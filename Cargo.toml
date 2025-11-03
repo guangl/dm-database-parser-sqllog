@@ -1,0 +1,22 @@
+[package]
+name = "dm-database-parser-sqllog"
+version = "0.1.0"
+edition = "2024"
+authors = ["guangl"]
+description = "达梦数据库的 sqllog 日志解析库"
+license = "MIT"
+repository = "https://github.com/guangl/dm-parser-sqllog"
+keywords = ["dm", "sqllog", "parser"]
+
+[dependencies]
+daachorse = "1.0.0"
+once_cell = "1.20"
+
+# 日志相关依赖
+tracing = { version = "0.1.41" }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+tracing-appender = { version = "0.2.3" }
+
+# SQLite 示例依赖（用于示例二进制）
+rusqlite = { version = "0.29", features = ["bundled"] }
+anyhow = "1.0"
