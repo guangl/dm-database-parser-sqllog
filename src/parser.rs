@@ -295,7 +295,7 @@ struct MetaParts<'a> {
     ip: Option<&'a str>,
 }
 
-fn parse_meta(meta_raw: &str) -> MetaParts {
+fn parse_meta(meta_raw: &str) -> MetaParts<'_> {
     let mut parts = MetaParts {
         ep: None,
         sess: None,
