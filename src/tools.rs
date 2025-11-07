@@ -1,4 +1,3 @@
-// 文件路径: c:\Users\guang\work\code\dm-database-parser-sqllog\src\tools.rs
 use once_cell::sync::Lazy;
 use super::matcher::Matcher;
 

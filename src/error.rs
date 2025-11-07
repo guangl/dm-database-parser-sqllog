@@ -1,4 +1,3 @@
-// 文件路径: c:\Users\guang\work\code\dm-database-parser-sqllog\src\error.rs
 use std::error::Error;
 use std::fmt;
 use std::num::{ParseFloatError, ParseIntError};
