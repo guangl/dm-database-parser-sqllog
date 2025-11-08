@@ -729,3 +729,265 @@ fn test_record_clone() {
     assert_eq!(record1, record2);
     assert_eq!(record1.lines, record2.lines);
 }
+
+#[test]
+fn test_build_body_with_empty_continuation() {
+    use super::parse_functions::build_body;
+
+    let first_line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1";
+    // 找到 ') ' 后的位置
+    let close_paren = first_line.find(')').unwrap();
+    let body_start = close_paren + 2; // ') ' 之后
+    let continuation_lines = &["", "  ", "WHERE id = 1"];
+
+    let body = build_body(first_line, body_start, continuation_lines);
+    assert!(body.contains("SELECT 1"));
+    assert!(body.contains("WHERE id = 1"));
+}
+
+#[test]
+fn test_build_body_start_beyond_length() {
+    use super::parse_functions::build_body;
+
+    let first_line = "Short";
+    let body_start = 100; // 超过字符串长度
+    let continuation_lines = &["Continuation line"];
+
+    let body = build_body(first_line, body_start, continuation_lines);
+    assert_eq!(body, "Continuation line");
+}
+
+#[test]
+fn test_extract_sql_body_no_indicators() {
+    use super::parse_functions::extract_sql_body;
+
+    let full_body = "SELECT * FROM users WHERE id = 1";
+    let sql_body = extract_sql_body(full_body);
+    assert_eq!(sql_body, full_body);
+}
+
+#[test]
+fn test_extract_sql_body_multiple_indicators() {
+    use super::parse_functions::extract_sql_body;
+
+    let full_body = "SELECT 1 EXECTIME: 10.5(ms) ROWCOUNT: 100(rows) EXEC_ID: 12345.";
+    let sql_body = extract_sql_body(full_body);
+    assert_eq!(sql_body, "SELECT 1");
+}
+
+#[test]
+fn test_extract_field_value_various_prefixes() {
+    use super::parse_functions::extract_field_value;
+
+    // 测试不同前缀
+    let result1 = extract_field_value("user:alice", "user:", "meta");
+    assert_eq!(result1, Ok("alice".to_string()));
+
+    let result2 = extract_field_value("trxid:12345", "trxid:", "meta");
+    assert_eq!(result2, Ok("12345".to_string()));
+
+    let result3 = extract_field_value("appname:my app", "appname:", "meta");
+    assert_eq!(result3, Ok("my app".to_string()));
+}
+
+#[test]
+fn test_parse_ep_field_boundaries() {
+    use super::parse_functions::parse_ep_field;
+
+    // 测试边界值
+    let result0 = parse_ep_field("EP[0]", "raw");
+    assert_eq!(result0, Ok(0));
+
+    let result255 = parse_ep_field("EP[255]", "raw");
+    assert_eq!(result255, Ok(255));
+
+    // 超出范围
+    let result256 = parse_ep_field("EP[256]", "raw");
+    assert!(result256.is_err());
+}
+
+#[test]
+fn test_extract_indicator_edge_cases() {
+    use super::parse_functions::extract_indicator;
+
+    // 测试带小数点的值
+    let result1 = extract_indicator("EXECTIME: 0.5(ms)", "EXECTIME:", "(ms)");
+    assert!(result1.is_ok());
+    assert_eq!(result1.unwrap(), "0.5");
+
+    // 测试大数值
+    let result2 = extract_indicator("ROWCOUNT: 999999999(rows)", "ROWCOUNT:", "(rows)");
+    assert!(result2.is_ok());
+    assert_eq!(result2.unwrap(), "999999999");
+
+    // 测试缺少后缀
+    let result3 = extract_indicator("EXECTIME: 10.5", "EXECTIME:", "(ms)");
+    assert!(result3.is_err());
+}
+
+#[test]
+fn test_parse_meta_edge_spaces() {
+    use super::parse_functions::parse_meta;
+
+    // appname 中包含多个空格
+    let meta_str =
+        "EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:my application name";
+    let result = parse_meta(meta_str);
+    assert!(result.is_ok());
+
+    let meta = result.unwrap();
+    assert_eq!(meta.appname, "my application name");
+}
+
+#[test]
+fn test_parse_indicators_partial() {
+    use super::parse_functions::parse_indicators;
+
+    // 只有 EXECTIME
+    let body1 = "SELECT 1 EXECTIME: 10.5(ms)";
+    assert!(parse_indicators(body1).is_err()); // 缺少其他必需字段
+
+    // 只有 ROWCOUNT
+    let body2 = "SELECT 1 ROWCOUNT: 100(rows)";
+    assert!(parse_indicators(body2).is_err());
+}
+
+#[test]
+fn test_parse_record_with_empty_lines() {
+    use super::parse_record;
+
+    // 包含空行的多行记录
+    let lines = vec![
+        "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *",
+        "FROM users",
+        "",
+        "WHERE id = 1",
+    ];
+
+    let result = parse_record(&lines);
+    assert!(result.is_ok());
+
+    let sqllog = result.unwrap();
+    assert!(sqllog.body.contains("FROM users"));
+    assert!(sqllog.body.contains("WHERE id = 1"));
+}
+
+#[test]
+fn test_parse_meta_only_5_fields() {
+    use super::parse_functions::parse_meta;
+
+    // 只有 5 个必需字段（EP, sess, thrd, user, trxid）
+    let meta_str = "EP[0] sess:123 thrd:456 user:alice trxid:789";
+    let result = parse_meta(meta_str);
+    assert!(result.is_ok());
+
+    let meta = result.unwrap();
+    assert_eq!(meta.ep, 0);
+    assert_eq!(meta.sess_id, "123");
+    assert_eq!(meta.thrd_id, "456");
+    assert_eq!(meta.username, "alice");
+    assert_eq!(meta.trxid, "789");
+    assert_eq!(meta.statement, ""); // 默认值
+    assert_eq!(meta.appname, ""); // 默认值
+    assert_eq!(meta.client_ip, ""); // 默认值
+}
+
+#[test]
+fn test_parse_meta_only_6_fields() {
+    use super::parse_functions::parse_meta;
+
+    // 6 个字段（包含 stmt，但没有 appname 和 ip）
+    let meta_str = "EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999";
+    let result = parse_meta(meta_str);
+    assert!(result.is_ok());
+
+    let meta = result.unwrap();
+    assert_eq!(meta.ep, 0);
+    assert_eq!(meta.sess_id, "123");
+    assert_eq!(meta.thrd_id, "456");
+    assert_eq!(meta.username, "alice");
+    assert_eq!(meta.trxid, "789");
+    assert_eq!(meta.statement, "999");
+    assert_eq!(meta.appname, ""); // 默认值
+    assert_eq!(meta.client_ip, ""); // 默认值
+}
+
+#[test]
+fn test_parse_meta_appname_with_ip() {
+    use super::parse_functions::parse_meta;
+
+    // appname 后面跟着 IP 字段
+    let meta_str = "EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:myapp ip:::ffff:192.168.1.100";
+    let result = parse_meta(meta_str);
+    assert!(result.is_ok());
+
+    let meta = result.unwrap();
+    assert_eq!(meta.ep, 0);
+    assert_eq!(meta.appname, "myapp");
+    assert_eq!(meta.client_ip, "192.168.1.100"); // extract_field_value 会去掉 "ip:::ffff:" 前缀
+}
+
+#[test]
+fn test_parse_meta_appname_with_spaces_and_ip() {
+    use super::parse_functions::parse_meta;
+
+    // appname 包含空格并且后面有 IP
+    let meta_str = "EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:my app name ip:::ffff:10.0.0.1";
+    let result = parse_meta(meta_str);
+    assert!(result.is_ok());
+
+    let meta = result.unwrap();
+    assert_eq!(meta.appname, "my app name");
+    assert_eq!(meta.client_ip, "10.0.0.1"); // extract_field_value 会去掉 "ip:::ffff:" 前缀
+}
+
+#[test]
+fn test_parse_meta_no_appname_field() {
+    use super::parse_functions::parse_meta;
+
+    // stmt 后面没有 appname 字段（直接结束）
+    let meta_str = "EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999";
+    let result = parse_meta(meta_str);
+    assert!(result.is_ok());
+
+    let meta = result.unwrap();
+    assert_eq!(meta.statement, "999");
+    assert_eq!(meta.appname, "");
+    assert_eq!(meta.client_ip, "");
+}
+
+#[test]
+fn test_build_body_edge_cases() {
+    use super::parse_functions::build_body;
+
+    // body_start 超出范围，但有 continuation_lines
+    let first_line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789) ";
+    let continuation = vec!["SELECT 1", "FROM dual"];
+    let result = build_body(first_line, first_line.len() + 10, &continuation);
+    assert_eq!(result, "SELECT 1\nFROM dual");
+
+    // 第一行为空，从第一个 continuation_line 开始
+    let result2 = build_body("short", 10, &["line1", "line2", "line3"]);
+    assert_eq!(result2, "line1\nline2\nline3");
+}
+
+#[test]
+fn test_extract_sql_body_pure_sql() {
+    use super::parse_functions::extract_sql_body;
+
+    // 没有任何 indicators
+    let body = "SELECT * FROM users WHERE id = 1";
+    let result = extract_sql_body(body);
+    assert_eq!(result, body);
+}
+
+#[test]
+fn test_extract_sql_body_multiple_possible_indicators() {
+    use super::parse_functions::extract_sql_body;
+
+    // 有多个可能的 indicator 前缀，应该选择最早出现的
+    let body = "SELECT * FROM users WHERE EXECTIME: 10.5(ms) ROWCOUNT: 100(rows)";
+    let result = extract_sql_body(body);
+    assert!(result.len() < body.len());
+    assert!(result.contains("SELECT * FROM users WHERE"));
+}

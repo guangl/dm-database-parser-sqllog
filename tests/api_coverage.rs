@@ -340,3 +340,168 @@ fn test_parse_records_from_file_mixed() -> Result<(), Box<dyn std::error::Error>
     assert_eq!(records.len(), 2);
     Ok(())
 }
+
+/// 测试 parse_records_from_string 处理各种输入
+#[test]
+fn test_parse_records_from_string_edge_cases() {
+    // 测试空字符串
+    let records = parse_records_from_string("");
+    assert_eq!(records.len(), 0);
+
+    // 测试只有无效行
+    let records = parse_records_from_string("invalid\nlines\nonly");
+    assert_eq!(records.len(), 0);
+
+    // 测试有效记录
+    let log = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1";
+    let records = parse_records_from_string(log);
+    assert_eq!(records.len(), 1);
+}
+
+/// 测试 parse_sqllogs_from_string 错误处理
+#[test]
+fn test_parse_sqllogs_from_string_errors() {
+    // 测试包含错误的日志
+    let log = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1
+invalid log line
+2025-08-12 10:57:09.549 (EP[1] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2"#;
+
+    let results = parse_sqllogs_from_string(log);
+
+    // 有效的记录应该成功解析
+    let successes: Vec<_> = results.iter().filter(|r| r.is_ok()).collect();
+    assert_eq!(successes.len(), 2);
+}
+
+/// 测试 for_each_sqllog 处理多行记录
+#[test]
+fn test_for_each_sqllog_multiline() {
+    let log = b"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *\nFROM users\nWHERE id = 1\n";
+    let reader = std::io::Cursor::new(log);
+
+    let mut bodies = Vec::new();
+    let count = for_each_sqllog(reader, |sqllog| {
+        bodies.push(sqllog.body.clone());
+    })
+    .unwrap();
+
+    assert_eq!(count, 1);
+    assert!(bodies[0].contains("FROM users"));
+    assert!(bodies[0].contains("WHERE id = 1"));
+}
+
+/// 测试 iter_records_from_file 迭代器模式
+#[test]
+fn test_iter_records_from_file_iteration() -> Result<(), Box<dyn std::error::Error>> {
+    let mut temp_file = NamedTempFile::new()?;
+    writeln!(
+        temp_file,
+        "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1"
+    )?;
+    writeln!(
+        temp_file,
+        "2025-08-12 10:57:09.549 (EP[1] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2"
+    )?;
+    writeln!(
+        temp_file,
+        "2025-08-12 10:57:09.550 (EP[2] sess:125 thrd:458 user:charlie trxid:791 stmt:1001 appname:app) SELECT 3"
+    )?;
+    temp_file.flush()?;
+
+    let parser = iter_records_from_file(temp_file.path())?;
+    let records: Vec<_> = parser.filter_map(Result::ok).collect();
+
+    assert_eq!(records.len(), 3);
+    Ok(())
+}
+
+/// 测试 iter_sqllogs_from_file 迭代器模式
+#[test]
+fn test_iter_sqllogs_from_file_iteration() -> Result<(), Box<dyn std::error::Error>> {
+    let mut temp_file = NamedTempFile::new()?;
+    writeln!(
+        temp_file,
+        "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1"
+    )?;
+    writeln!(
+        temp_file,
+        "2025-08-12 10:57:09.549 (EP[1] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2"
+    )?;
+    temp_file.flush()?;
+
+    let parser = iter_sqllogs_from_file(temp_file.path())?;
+    let sqllogs: Vec<_> = parser.filter_map(Result::ok).collect();
+
+    assert_eq!(sqllogs.len(), 2);
+    assert_eq!(sqllogs[0].meta.username, "alice");
+    assert_eq!(sqllogs[1].meta.username, "bob");
+    Ok(())
+}
+
+/// 测试 parse_sqllogs_from_file 处理复杂SQL
+#[test]
+fn test_parse_sqllogs_from_file_complex_sql() -> Result<(), Box<dyn std::error::Error>> {
+    let mut temp_file = NamedTempFile::new()?;
+    writeln!(
+        temp_file,
+        "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT a.*, b.name"
+    )?;
+    writeln!(temp_file, "FROM table_a a")?;
+    writeln!(temp_file, "JOIN table_b b ON a.id = b.aid")?;
+    writeln!(temp_file, "WHERE a.status = 'active'")?;
+    writeln!(temp_file, "ORDER BY a.created_at DESC")?;
+    temp_file.flush()?;
+
+    let (sqllogs, _errors) = parse_sqllogs_from_file(temp_file.path())?;
+
+    assert_eq!(sqllogs.len(), 1);
+    assert!(sqllogs[0].body.contains("JOIN table_b"));
+    assert!(sqllogs[0].body.contains("ORDER BY"));
+    Ok(())
+}
+
+/// 测试 for_each_sqllog_in_string 回调计数
+#[test]
+fn test_for_each_sqllog_callback_count() {
+    let log = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1
+2025-08-12 10:57:09.549 (EP[1] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2
+2025-08-12 10:57:09.550 (EP[2] sess:125 thrd:458 user:charlie trxid:791 stmt:1001 appname:app) SELECT 3"#;
+
+    let mut callback_count = 0;
+    let result = for_each_sqllog_in_string(log, |_| {
+        callback_count += 1;
+    });
+
+    assert!(result.is_ok());
+    assert_eq!(callback_count, 3);
+    assert_eq!(result.unwrap(), 3);
+}
+
+/// 测试 for_each_sqllog 处理空数据
+#[test]
+fn test_for_each_sqllog_empty_reader() {
+    let reader = std::io::Cursor::new(b"");
+    let result = for_each_sqllog(reader, |_| {});
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), 0);
+}
+
+/// 测试 parse_records_from_string 处理包含性能指标的记录
+#[test]
+fn test_parse_records_from_string_with_performance() {
+    let log = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1 EXECTIME:10.5(ms) ROWCOUNT:100(rows) EXEC_ID:xyz789";
+    let records = parse_records_from_string(log);
+    assert_eq!(records.len(), 1);
+    assert!(records[0].lines[0].contains("EXECTIME"));
+}
+
+/// 测试 parse_sqllogs_from_string 返回所有结果（包括错误）
+#[test]
+fn test_parse_sqllogs_from_string_all_results() {
+    let log = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1\ninvalid\n2025";
+    let results = parse_sqllogs_from_string(log);
+
+    // 应该包含成功和失败的结果
+    let ok_count = results.iter().filter(|r| r.is_ok()).count();
+    assert_eq!(ok_count, 1);
+}

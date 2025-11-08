@@ -64,3 +64,88 @@ impl<R: Read> Iterator for SqllogParser<R> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_sqllog_parser_basic() {
+        let input = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1\n";
+        let cursor = Cursor::new(input);
+        let parser = SqllogParser::new(cursor);
+
+        let results: Vec<_> = parser.collect();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_ok());
+
+        let sqllog = results[0].as_ref().unwrap();
+        assert_eq!(sqllog.ts, "2025-08-12 10:57:09.548");
+        assert_eq!(sqllog.meta.username, "alice");
+        assert_eq!(sqllog.body, "SELECT 1");
+    }
+
+    #[test]
+    fn test_sqllog_parser_with_indicators() {
+        let input = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1 EXECTIME: 10.5(ms) ROWCOUNT: 100(rows) EXEC_ID: 12345.\n";
+        let cursor = Cursor::new(input);
+        let parser = SqllogParser::new(cursor);
+
+        let results: Vec<_> = parser.collect();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_ok());
+
+        let sqllog = results[0].as_ref().unwrap();
+        assert!(sqllog.has_indicators());
+        assert_eq!(sqllog.execute_time(), Some(10.5));
+        assert_eq!(sqllog.row_count(), Some(100));
+        assert_eq!(sqllog.execute_id(), Some(12345));
+    }
+
+    #[test]
+    fn test_sqllog_parser_multiline() {
+        let input = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *
+FROM users
+WHERE id = 1
+"#;
+        let cursor = Cursor::new(input);
+        let parser = SqllogParser::new(cursor);
+
+        let results: Vec<_> = parser.collect();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_ok());
+
+        let sqllog = results[0].as_ref().unwrap();
+        assert!(sqllog.body.contains("SELECT *"));
+        assert!(sqllog.body.contains("FROM users"));
+        assert!(sqllog.body.contains("WHERE id = 1"));
+    }
+
+    #[test]
+    fn test_sqllog_parser_empty() {
+        let input = "";
+        let cursor = Cursor::new(input);
+        let parser = SqllogParser::new(cursor);
+
+        let results: Vec<_> = parser.collect();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_sqllog_parser_multiple_records() {
+        let input = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1
+2025-08-12 10:57:10.548 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2
+"#;
+        let cursor = Cursor::new(input);
+        let parser = SqllogParser::new(cursor);
+
+        let results: Vec<_> = parser.collect();
+        assert_eq!(results.len(), 2);
+        assert!(results[0].is_ok());
+        assert!(results[1].is_ok());
+
+        assert_eq!(results[0].as_ref().unwrap().meta.username, "alice");
+        assert_eq!(results[1].as_ref().unwrap().meta.username, "bob");
+    }
+}
