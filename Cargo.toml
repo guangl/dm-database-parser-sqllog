@@ -10,7 +10,17 @@ documentation = "https://docs.rs/dm-database-parser-sqllog"
 homepage = "https://github.com/guangl/dm-parser-sqllog"
 keywords = ["sqllog", "parser", "dm-database"]
 categories = ["parsing", "database", "text-processing"]
-exclude = ["benches", "docs", "examples", "sqllogs", "target", "tests"]
+exclude = [
+    "benches",
+    "docs",
+    "examples",
+    "sqllogs",
+    "target",
+    "tests",
+    ".github",
+    "*.json",
+    ".gitignore",
+]
 
 [lib]
 name = "dm_database_parser_sqllog"
