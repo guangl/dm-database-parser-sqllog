@@ -11,6 +11,7 @@ static DEFAULT_PATTERNS: &[&str] = &[
 #[allow(dead_code)]
 static DEFAULT_MATCHER: Lazy<Matcher> = Lazy::new(|| Matcher::from_patterns(DEFAULT_PATTERNS));
 
+#[allow(dead_code)]
 #[inline(always)]
 pub fn is_ts_millis(s: &str) -> bool {
     let bytes = s.as_bytes();
@@ -88,6 +89,7 @@ pub fn is_ts_millis_bytes(bytes: &[u8]) -> bool {
 /// - 关键字匹配是基于文本子串（大小写敏感）；如果需要忽略大小写或支持更多变体，应在自动机构建时调整或归一化输入；
 /// - 只检查关键字的首次出现位置，以验证顺序；若关键字重复，只看第一次出现的位置；
 /// - 时间戳严格按字符位置校验，不尝试解析为日期/时间类型以节省分配与解析开销。
+#[allow(dead_code)]
 pub fn is_record_start(line: &str) -> bool {
     // 1) 要求时间戳严格从行首开始（不允许前导空白）
     //    因为日志格式保证时间戳占据前 23 个字符的位置
