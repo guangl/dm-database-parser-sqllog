@@ -1,653 +1,452 @@
-/// 解析后的日志记录
-///
-/// 该结构体包含从日志文本中解析出的所有字段。所有字符串字段都是对原始输入文本的引用，
-/// 因此不会产生额外的内存分配。
-///
-/// # 字段说明
-///
-/// - `ts`: 时间戳字符串（格式：`YYYY-MM-DD HH:MM:SS.mmm`）
-/// - `meta_raw`: 原始元信息字符串（括号内的内容）
-/// - `ep`: 执行计划标识符
-/// - `sess`: 会话标识符
-/// - `thrd`: 线程标识符
-/// - `user`: 用户名
-/// - `trxid`: 事务ID
-/// - `stmt`: 语句标识符
-/// - `appname`: 应用程序名称
-/// - `ip`: 客户端IP地址（可选）
-/// - `body`: 记录主体内容（SQL语句等）
-/// - `execute_time_ms`: 执行时间（毫秒，可选）
-/// - `row_count`: 影响的行数（可选）
-/// - `execute_id`: 执行ID（可选）
-///
-/// # 示例
-///
-/// ```rust
-/// use dm_database_parser_sqllog::parse_record;
-///
-/// let log_text = "2025-08-12 10:57:09.562 (EP[0] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) SELECT 1";
-/// let parsed = parse_record(log_text);
-/// println!("用户: {}, 事务ID: {}", parsed.user, parsed.trxid);
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParsedRecord<'a> {
-    pub ts: &'a str,
-    pub meta_raw: &'a str,
-    pub ep: &'a str,
-    pub sess: &'a str,
-    pub thrd: &'a str,
-    pub user: &'a str,
-    pub trxid: &'a str,
-    pub stmt: &'a str,
-    pub appname: &'a str,
-    pub ip: Option<&'a str>,
-    pub body: &'a str,
-    pub execute_time_ms: Option<u64>,
-    pub row_count: Option<u64>,
-    pub execute_id: Option<u64>,
+use crate::error::ParseError;
+use crate::sqllog::{IndicatorsParts, MetaParts, Sqllog};
+use crate::tools::is_record_start_line;
+use once_cell::sync::Lazy;
+use std::io::{BufRead, BufReader, Read};
+
+// 常量定义
+const TIMESTAMP_LENGTH: usize = 23;
+const MIN_RECORD_LENGTH: usize = 25;
+const META_START_INDEX: usize = 25;
+const BODY_OFFSET: usize = 2; // ") " 两个字符
+
+// 使用 Lazy 静态初始化 indicator 模式集合，避免重复创建
+static INDICATOR_PATTERNS: Lazy<[&'static str; 3]> =
+    Lazy::new(|| ["EXECTIME:", "ROWCOUNT:", "EXEC_ID:"]);
+
+// Meta 字段前缀常量
+static SESS_PREFIX: &str = "sess:";
+static THRD_PREFIX: &str = "thrd:";
+static USER_PREFIX: &str = "user:";
+static TRXID_PREFIX: &str = "trxid:";
+static STMT_PREFIX: &str = "stmt:";
+static APPNAME_PREFIX: &str = "appname:";
+static IP_PREFIX: &str = "ip:::ffff:";
+
+// Indicator 相关的静态常量
+static EXECTIME_PREFIX: &str = "EXECTIME: ";
+static EXECTIME_SUFFIX: &str = "(ms)";
+static ROWCOUNT_PREFIX: &str = "ROWCOUNT: ";
+static ROWCOUNT_SUFFIX: &str = "(rows)";
+static EXEC_ID_PREFIX: &str = "EXEC_ID: ";
+static EXEC_ID_SUFFIX: &str = ".";
+
+/// 表示一条完整的日志记录（可能包含多行）
+#[derive(Debug, Clone, PartialEq)]
+pub struct Record {
+    /// 记录的所有行（第一行是起始行，后续行是继续行）
+    pub lines: Vec<String>,
 }
 
-/// 迭代器，从输入日志文本中产生记录切片（`&str`），不进行额外分配。
-///
-/// `RecordSplitter` 旨在以最小分配（零分配或极少分配）的方式，从整个日志文本中
-/// 按"记录"（record）边界切分并逐条返回。这里的"记录"由如下格式决定：每条记录
-/// 都以固定长度的时间戳开始（23 字符，格式 `YYYY-MM-DD HH:MM:SS.mmm`），且时间戳位于
-/// 行首（紧贴换行或文件开头），时间戳之后通常跟随一个空格和一个以圆括号包围的元信息，
-/// 然后是记录主体（body），记录主体可能跨多行。
-///
-/// # 设计目标
-///
-/// - 尽量避免对每条记录进行拷贝；返回的是对原始输入字符串的切片（`&str`）
-/// - 通过只扫描字节数组并使用简单的索引运算来保持最高性能
-/// - 保持内部不变式以便 `next()` 实现更简单且安全
-///
-/// # 使用示例
-///
-/// ```rust
-/// use dm_database_parser_sqllog::RecordSplitter;
-///
-/// let log_text = r#"
-/// 2025-08-12 10:57:09.562 (EP[0] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) SELECT 1
-/// 2025-08-12 10:57:10.123 (EP[0] sess:2 thrd:2 user:guest trxid:0 stmt:2 appname:MyApp) SELECT 2
-/// "#;
-///
-/// let splitter = RecordSplitter::new(log_text);
-/// for record in splitter {
-///     println!("记录: {}", record.lines().next().unwrap_or(""));
-/// }
-/// ```
-pub struct RecordSplitter<'a> {
-    text: &'a str,
-    bytes: &'a [u8],
-    n: usize,
-    // 扫描位置：始终单调不减
-    scan_pos: usize,
-    // 下一个要返回的记录的起始索引
-    next_start: Option<usize>,
-    // 是否已返回最后一条记录
+impl Record {
+    /// 创建新的记录
+    pub fn new(start_line: String) -> Self {
+        Self {
+            lines: vec![start_line],
+        }
+    }
+
+    /// 添加继续行
+    pub fn add_line(&mut self, line: String) {
+        self.lines.push(line);
+    }
+
+    /// 获取起始行
+    pub fn start_line(&self) -> &str {
+        &self.lines[0]
+    }
+
+    /// 获取所有行
+    pub fn all_lines(&self) -> &[String] {
+        &self.lines
+    }
+
+    /// 获取完整的记录内容（所有行拼接）
+    pub fn full_content(&self) -> String {
+        self.lines.join("\n")
+    }
+
+    /// 判断是否有继续行
+    pub fn has_continuation_lines(&self) -> bool {
+        self.lines.len() > 1
+    }
+
+    /// 将 Record 解析为 Sqllog
+    pub fn parse_to_sqllog(&self) -> Result<Sqllog, ParseError> {
+        let lines: Vec<&str> = self.lines.iter().map(|s| s.as_str()).collect();
+        parse_record(&lines)
+    }
+}
+
+/// 从 Reader 中按行读取并解析成 Record 的迭代器
+pub struct RecordParser<R: Read> {
+    reader: BufReader<R>,
+    buffer: String,
+    next_line: Option<String>,
     finished: bool,
-    // 缓存的前缀（前导错误）结束索引
-    first_start: Option<usize>,
 }
 
-///
-/// 构造一个 RecordSplitter，用于将日志文本拆分为记录。
-/// 拆分的核心规则：
-/// 1. 每条记录以固定长度的时间戳开始（23 字符，`YYYY-MM-DD HH:MM:SS.mmm`），时间戳必须位于行首（紧贴换行或文件开头）。
-/// 2. 紧随时间戳后，必须跟着一个空格和以括号包围的元信息字段，格式和顺序如下：
-///    EP[xxx] sess:xxx thrd:xxx user:xxx trxid:xxx stmt:xxx appname:xxx
-///    所有字段缺一不可，且顺序必须一致。
-/// 3. 记录主体（body）内容可跨多行，直至遇到下一条合法记录的时间戳或文件结尾。
-/// 4. 每条记录内部，最终必定包含一行如下 "END" 信息：
-///    EXECTIME: xxxms ROWCOUNT: xxx EXEC_ID: xxx
-///    该行用于判定记录结束。
-///
-/// Splitter 工作流程：
-/// - 在整个文本中线性查找，基于上述规则判定记录起始和结束位置。
-/// - 避免不必要的分配，每条记录直接作为对原始日志输入的切片返回（&str）。
-///
-impl<'a> RecordSplitter<'a> {
-    pub fn new(text: &'a str) -> Self {
-        let bytes = text.as_bytes();
-        let n = text.len();
-        let first_start = Self::find_first_record_start(bytes, n);
-
-        let scan_pos = first_start.unwrap_or(0).saturating_add(1);
-        RecordSplitter {
-            text,
-            bytes,
-            n,
-            scan_pos,
-            next_start: first_start,
+impl<R: Read> RecordParser<R> {
+    /// 创建新的 RecordParser
+    pub fn new(reader: R) -> Self {
+        Self {
+            reader: BufReader::new(reader),
+            buffer: String::new(),
+            next_line: None,
             finished: false,
-            first_start,
         }
     }
 
-    /// 查找第一个合法记录的起始位置
-    fn find_first_record_start(bytes: &[u8], n: usize) -> Option<usize> {
-        const TS_LEN: usize = 23;
-        const FIELDS: [&[u8]; 7] = [
-            b"EP[",
-            b"sess:",
-            b"thrd:",
-            b"user:",
-            b"trxid:",
-            b"stmt:",
-            b"appname:",
-        ];
+    /// 读取下一行
+    fn read_line(&mut self) -> std::io::Result<Option<String>> {
+        self.buffer.clear();
+        let bytes_read = self.reader.read_line(&mut self.buffer)?;
 
-        if n < TS_LEN {
-            return None;
+        if bytes_read == 0 {
+            Ok(None)
+        } else {
+            // 移除行尾的换行符
+            let line = self.buffer.trim_end_matches(&['\r', '\n'][..]).to_string();
+            Ok(Some(line))
         }
-
-        let limit = n.saturating_sub(TS_LEN);
-        (0..=limit).find(|&pos| {
-            Self::is_line_start_with_timestamp(bytes, n, pos, TS_LEN)
-                && Self::validate_meta_fields(bytes, n, pos + TS_LEN, &FIELDS)
-        })
-    }
-
-    /// 检查位置是否为行首且后跟合法时间戳
-    fn is_line_start_with_timestamp(bytes: &[u8], n: usize, pos: usize, ts_len: usize) -> bool {
-        if pos + ts_len > n {
-            return false;
-        }
-        let is_line_start = pos == 0 || bytes[pos - 1] == b'\n';
-        let has_valid_timestamp = crate::tools::is_ts_millis_bytes(&bytes[pos..pos + ts_len]);
-        is_line_start && has_valid_timestamp
-    }
-
-    /// 验证元信息字段是否按顺序匹配（所有字段必须存在）
-    fn validate_meta_fields(bytes: &[u8], n: usize, mut pos: usize, fields: &[&[u8]]) -> bool {
-        // 检查时间戳后是否有空格
-        if pos >= n || bytes[pos] != b' ' {
-            return false;
-        }
-        pos += 1; // 跳过空格
-
-        // 跳过可选的左括号
-        if pos < n && bytes[pos] == b'(' {
-            pos += 1;
-        }
-
-        // 必须匹配所有字段
-        for &pat in fields {
-            // 检查字段前缀是否匹配
-            let pat_len = pat.len();
-            if pos + pat_len > n || &bytes[pos..pos + pat_len] != pat {
-                return false;
-            }
-            pos += pat_len;
-
-            // 跳过字段值
-            if pat == b"EP[" {
-                // EP[ 后直到 ]
-                while pos < n && bytes[pos] != b']' {
-                    pos += 1;
-                }
-                if pos >= n || bytes[pos] != b']' {
-                    return false;
-                }
-                pos += 1; // 跳过 ]
-            } else {
-                // 其他字段：跳过字段值直到空格
-                if pos >= n {
-                    return false;
-                }
-                while pos < n && bytes[pos] != b' ' {
-                    pos += 1;
-                }
-            }
-            // 跳过分隔的空格
-            while pos < n && bytes[pos] == b' ' {
-                pos += 1;
-            }
-        }
-
-        // 所有字段都已匹配
-        true
-    }
-
-    /// 返回完整的前导错误文本切片（第一条记录之前的所有内容）
-    ///
-    /// 说明：当日志文件开头存在非记录内容（例如垃圾行或日志碎片）时，`first_start` 会
-    /// 指向第一个合法记录的起始位置；`leading_errors_slice()` 返回从文件开始到该位置的全部文本，
-    /// 便于调用者单独处理这部分错误/告警信息。
-    pub fn leading_errors_slice(&self) -> Option<&'a str> {
-        self.first_start.map(|s| &self.text[..s])
     }
 }
 
-impl<'a> Iterator for RecordSplitter<'a> {
-    type Item = &'a str;
+impl<R: Read> Iterator for RecordParser<R> {
+    type Item = std::io::Result<Record>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.finished {
             return None;
         }
-        let start = match self.next_start {
-            Some(s) => s,
-            None => {
-                self.finished = true;
-                return None;
-            }
+
+        // 获取记录的起始行
+        let start_line = match self.get_start_line() {
+            Ok(Some(line)) => line,
+            Ok(None) => return None,
+            Err(e) => return Some(Err(e)),
         };
 
-        // 扫描下一个记录的起始位置
-        // 逻辑：从当前 scan_pos 向前搜索下一个满足“行首+时间戳”的位置。
-        // 如果找到，则当前记录的结束位置为该 timestamp 的起始位置（end = pos），并把 next_start 设置为该 pos，
-        // 以便下一次调用返回后续记录；如果搜索到末尾未找到，则把剩余文本作为最后一条记录返回。
-        if self.scan_pos > self.n {
-            // 没有足够空间容纳另一个时间戳，返回剩余内容
-            self.finished = true;
-            return Some(&self.text[start..self.n]);
+        let mut record = Record::new(start_line);
+
+        // 读取继续行
+        match self.read_continuation_lines(&mut record) {
+            Ok(()) => Some(Ok(record)),
+            Err(e) => Some(Err(e)),
         }
-        let limit = self.n.saturating_sub(23);
-        let mut pos = self.scan_pos;
-        while pos <= limit {
-            if (pos == 0 || self.bytes[pos - 1] == b'\n')
-                && crate::tools::is_ts_millis_bytes(&self.bytes[pos..pos + 23])
-            {
-                // 找到下一个起始位置
-                let end = pos;
-                // 为下一次调用做准备
-                self.next_start = Some(pos);
-                self.scan_pos = pos + 1;
-                return Some(&self.text[start..end]);
+    }
+}
+
+impl<R: Read> RecordParser<R> {
+    /// 获取下一个记录的起始行
+    fn get_start_line(&mut self) -> std::io::Result<Option<String>> {
+        // 如果有缓存的下一行（上次读取时遇到的新起始行）
+        if let Some(line) = self.next_line.take() {
+            return Ok(Some(line));
+        }
+
+        // 读取并跳过非起始行，直到找到第一个有效起始行
+        loop {
+            match self.read_line()? {
+                Some(line) if is_record_start_line(&line) => return Ok(Some(line)),
+                Some(_) => continue, // 跳过非起始行
+                None => {
+                    self.finished = true;
+                    return Ok(None);
+                }
             }
-            pos += 1;
-        }
-
-        // 没有下一个起始位置 => 返回最后一条记录
-        self.finished = true;
-        Some(&self.text[start..self.n])
-    }
-}
-
-/// 使用时间戳检测将完整日志文本拆分为记录。
-///
-/// 该函数会扫描整个文本，识别所有合法的日志记录，并将它们拆分为独立的切片。
-/// 同时会收集文件开头的前导错误行（在第一个合法记录之前的内容）。
-///
-/// # 参数
-///
-/// * `text` - 完整的日志文本
-///
-/// # 返回值
-///
-/// 返回一个元组 `(records, errors)`：
-/// - `records`: 所有合法记录的切片向量，每个元素都是对原始文本的引用
-/// - `errors`: 前导错误行的向量（在第一个合法记录之前的所有行）
-///
-/// # 示例
-///
-/// ```rust
-/// use dm_database_parser_sqllog::split_by_ts_records_with_errors;
-///
-/// let log_text = r#"
-/// garbage line
-/// 2025-08-12 10:57:09.562 (EP[0] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) SELECT 1
-/// 2025-08-12 10:57:10.123 (EP[0] sess:2 thrd:2 user:guest trxid:0 stmt:2 appname:MyApp) SELECT 2
-/// "#;
-///
-/// let (records, errors) = split_by_ts_records_with_errors(log_text);
-/// println!("找到 {} 条记录，{} 条前导错误", records.len(), errors.len());
-/// ```
-pub fn split_by_ts_records_with_errors<'a>(text: &'a str) -> (Vec<&'a str>, Vec<&'a str>) {
-    let mut records: Vec<&'a str> = Vec::new();
-    let mut errors: Vec<&'a str> = Vec::new();
-
-    let splitter = RecordSplitter::new(text);
-    if let Some(prefix) = splitter.leading_errors_slice() {
-        for line in prefix.lines() {
-            errors.push(line);
         }
     }
-    for rec in splitter {
-        records.push(rec);
-    }
-    (records, errors)
-}
 
-/// 拆分到调用者提供的容器以避免每次调用分配。
-///
-/// 该函数会清空并填充 `records` 和 `errors`。如果调用者在重复调用中重用这些
-/// 向量（例如在循环中），则可以避免每次调用分配新的 `Vec`。
-///
-/// # 参数
-///
-/// * `text` - 完整的日志文本
-/// * `records` - 用于存储记录切片的向量（会被清空后填充）
-/// * `errors` - 用于存储前导错误行的向量（会被清空后填充）
-///
-/// # 示例
-///
-/// ```rust
-/// use dm_database_parser_sqllog::split_into;
-///
-/// let mut records = Vec::new();
-/// let mut errors = Vec::new();
-///
-/// let log_text = r#"2025-08-12 10:57:09.562 (EP[0] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) SELECT 1"#;
-/// split_into(log_text, &mut records, &mut errors);
-/// // 处理 records 和 errors...
-/// ```
-pub fn split_into<'a>(text: &'a str, records: &mut Vec<&'a str>, errors: &mut Vec<&'a str>) {
-    records.clear();
-    errors.clear();
-
-    let splitter = RecordSplitter::new(text);
-    if let Some(prefix) = splitter.leading_errors_slice() {
-        for line in prefix.lines() {
-            errors.push(line);
-        }
-    }
-    for rec in splitter {
-        records.push(rec);
-    }
-}
-
-/// 对记录进行流式处理，并对每条记录调用回调而不分配 Vec。
-///
-/// 这是处理日志文本时分配最少的方式。该函数会遍历所有记录，对每条记录调用回调函数，
-/// 但不分配任何 Vec 来存储记录。
-///
-/// # 参数
-///
-/// * `text` - 完整的日志文本
-/// * `f` - 对每条记录调用的回调函数
-///
-/// # 示例
-///
-/// ```rust
-/// use dm_database_parser_sqllog::for_each_record;
-///
-/// let log_text = r#"..."#;
-/// for_each_record(log_text, |rec| {
-///     println!("记录: {}", rec.lines().next().unwrap_or(""));
-/// });
-/// ```
-pub fn for_each_record<F>(text: &str, mut f: F)
-where
-    F: FnMut(&str),
-{
-    let splitter = RecordSplitter::new(text);
-    // 对流式 API 忽略前导错误；如果需要，调用者可以通过 RecordSplitter::leading_errors_slice 检查它们。
-    if let Some(_prefix) = splitter.leading_errors_slice() {
-        // 在迭代之前释放前缀借用
-    }
-    for rec in splitter {
-        f(rec);
-    }
-}
-
-/// 解析每条记录并用 ParsedRecord 调用回调；与流式 Splitter 一起使用时实现零分配。
-///
-/// 该函数会遍历所有记录，解析每条记录为 `ParsedRecord`，然后调用回调函数。
-/// 与 `for_each_record` 类似，这是零分配的处理方式。
-///
-/// # 参数
-///
-/// * `text` - 完整的日志文本
-/// * `f` - 对每条解析后的记录调用的回调函数
-///
-/// # 示例
-///
-/// ```rust
-/// use dm_database_parser_sqllog::parse_records_with;
-///
-/// let log_text = r#"..."#;
-/// parse_records_with(log_text, |parsed| {
-///     println!("用户: {}, 事务ID: {}", parsed.user, parsed.trxid);
-/// });
-/// ```
-pub fn parse_records_with<F>(text: &str, mut f: F)
-where
-    F: for<'r> FnMut(ParsedRecord<'r>),
-{
-    for_each_record(text, |rec| {
-        let parsed = parse_record(rec);
-        f(parsed);
-    });
-}
-
-/// 解析到调用方提供的 Vec 中以避免每次调用分配新的 Vec。
-pub fn parse_into<'a>(text: &'a str, out: &mut Vec<ParsedRecord<'a>>) {
-    out.clear();
-    let splitter = RecordSplitter::new(text);
-    for rec in splitter {
-        out.push(parse_record(rec));
-    }
-}
-
-/// 顺序解析所有记录并返回 ParsedRecord 的 Vec。
-///
-/// 这是最简单的解析方式，会分配一个新的 Vec 来存储所有解析后的记录。
-/// 如果需要避免分配，请使用 `parse_into` 或 `parse_records_with`。
-///
-/// # 参数
-///
-/// * `text` - 完整的日志文本
-///
-/// # 返回值
-///
-/// 返回包含所有解析后记录的向量。
-///
-/// # 示例
-///
-/// ```rust
-/// use dm_database_parser_sqllog::parse_all;
-///
-/// let log_text = r#"..."#;
-/// let records = parse_all(log_text);
-/// for record in records {
-///     println!("用户: {}", record.user);
-/// }
-/// ```
-pub fn parse_all(text: &str) -> Vec<ParsedRecord<'_>> {
-    let splitter = RecordSplitter::new(text);
-    splitter.map(|r| parse_record(r)).collect()
-}
-
-fn parse_digits_forward(s: &str, mut i: usize) -> Option<(u64, usize)> {
-    let bytes = s.as_bytes();
-    let n = bytes.len();
-    // 跳过非数字
-    while i < n && !bytes[i].is_ascii_digit() {
-        i += 1;
-    }
-    if i >= n || !bytes[i].is_ascii_digit() {
-        return None;
-    }
-    let mut val: u64 = 0;
-    while i < n && bytes[i].is_ascii_digit() {
-        val = val
-            .saturating_mul(10)
-            .saturating_add((bytes[i] - b'0') as u64);
-        i += 1;
-    }
-    Some((val, i))
-}
-
-// 辅助：将记录分割成 (ts, meta_raw, body)，均为 &str（借用）
-fn split_ts_meta_body<'a>(rec: &'a str) -> (&'a str, &'a str, &'a str) {
-    let ts: &'a str = if rec.len() >= 23 { &rec[..23] } else { "" };
-    let after_ts: &'a str = if rec.len() > 23 { &rec[23..] } else { "" };
-    let mut meta_raw: &'a str = "";
-    let mut body: &'a str = "";
-
-    if let Some(open_idx) = after_ts.find('(') {
-        if let Some(close_rel) = after_ts[open_idx..].find(')') {
-            meta_raw = &after_ts[open_idx + 1..open_idx + close_rel];
-            let body_start = 23 + open_idx + close_rel + 1;
-            if body_start < rec.len() {
-                body = rec[body_start..].trim_start();
+    /// 读取当前记录的所有继续行
+    fn read_continuation_lines(&mut self, record: &mut Record) -> std::io::Result<()> {
+        loop {
+            match self.read_line()? {
+                Some(line) if is_record_start_line(&line) => {
+                    // 遇到下一个起始行，保存它并结束当前记录
+                    self.next_line = Some(line);
+                    break;
+                }
+                Some(line) => {
+                    // 继续行
+                    record.add_line(line);
+                }
+                None => {
+                    // 文件结束
+                    self.finished = true;
+                    break;
+                }
             }
-        } else {
-            // 没有闭合括号：将剩余部分视为 body
-            body = after_ts;
         }
+        Ok(())
+    }
+}
+
+/// 便捷函数：从字符串解析记录
+pub fn parse_records_from_string(content: &str) -> Vec<Record> {
+    let cursor = std::io::Cursor::new(content.as_bytes());
+    RecordParser::new(cursor).filter_map(|r| r.ok()).collect()
+}
+
+/// 将 RecordParser 转换为 Sqllog 迭代器的适配器
+pub struct SqllogParser<R: Read> {
+    record_parser: RecordParser<R>,
+}
+
+impl<R: Read> SqllogParser<R> {
+    /// 创建新的 SqllogParser
+    pub fn new(reader: R) -> Self {
+        Self {
+            record_parser: RecordParser::new(reader),
+        }
+    }
+}
+
+impl<R: Read> Iterator for SqllogParser<R> {
+    type Item = Result<Sqllog, ParseError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.record_parser.next()? {
+            Ok(record) => Some(record.parse_to_sqllog()),
+            Err(e) => Some(Err(ParseError::FileNotFound(e.to_string()))),
+        }
+    }
+}
+
+/// 便捷函数：从字符串直接解析为 Sqllog 列表
+pub fn parse_sqllogs_from_string(content: &str) -> Vec<Result<Sqllog, ParseError>> {
+    let cursor = std::io::Cursor::new(content.as_bytes());
+    SqllogParser::new(cursor).collect()
+}
+
+/// 从行数组解析成 Sqllog 结构
+///
+/// # 参数
+/// - `lines`: 包含日志记录的行（第一行必须是有效的起始行）
+///
+/// # 返回
+/// - `Ok(Sqllog)`: 解析成功
+/// - `Err(ParseError)`: 解析失败
+pub fn parse_record(lines: &[&str]) -> Result<Sqllog, ParseError> {
+    if lines.is_empty() {
+        return Err(ParseError::EmptyInput);
+    }
+
+    let first_line = lines[0];
+
+    // 验证第一行格式
+    if !is_record_start_line(first_line) {
+        return Err(ParseError::InvalidRecordStartLine);
+    }
+
+    // 验证行长度
+    if first_line.len() < MIN_RECORD_LENGTH {
+        return Err(ParseError::LineTooShort(first_line.len()));
+    }
+
+    // 解析时间戳
+    let ts = &first_line[0..TIMESTAMP_LENGTH];
+
+    // 查找 meta 部分的右括号
+    let closing_paren = first_line
+        .find(')')
+        .ok_or(ParseError::MissingClosingParen)?;
+
+    if closing_paren <= META_START_INDEX {
+        return Err(ParseError::InsufficientMetaFields(0));
+    }
+
+    // 解析 meta 部分
+    let meta_str = &first_line[META_START_INDEX..closing_paren];
+    let meta = parse_meta(meta_str)?;
+
+    // 构建 body（包含继续行）
+    let body_start = closing_paren + BODY_OFFSET;
+    let full_body = build_body(first_line, body_start, &lines[1..]);
+
+    // 尝试解析 indicators（可选）
+    let indicators = parse_indicators(&full_body).ok();
+
+    // 提取纯 SQL body（移除 indicators）
+    let body = if indicators.is_some() {
+        extract_sql_body(&full_body)
     } else {
-        // 没有元数据括号：时间戳之后的全部内容都是 body
-        body = after_ts;
-    }
-
-    (ts, meta_raw, body)
-}
-
-// 辅助：解析 meta_raw 中的各个字段，返回一个小结构
-#[derive(Debug)]
-struct MetaParts<'a> {
-    ep: &'a str,
-    sess: &'a str,
-    thrd: &'a str,
-    user: &'a str,
-    trxid: &'a str,
-    stmt: &'a str,
-    appname: &'a str,
-    ip: Option<&'a str>,
-}
-
-fn parse_meta(meta_raw: &str) -> MetaParts<'_> {
-    let mut parts = MetaParts {
-        ep: "",
-        sess: "",
-        thrd: "",
-        user: "",
-        trxid: "",
-        stmt: "",
-        appname: "",
-        ip: None,
+        full_body
     };
 
-    let mut iter = meta_raw.split_whitespace().peekable();
-    while let Some(tok) = iter.next() {
-        if tok.starts_with("EP[") {
-            parts.ep = tok;
-        } else if let Some(val) = tok.strip_prefix("sess:") {
-            parts.sess = val;
-        } else if let Some(val) = tok.strip_prefix("thrd:") {
-            parts.thrd = val;
-        } else if let Some(val) = tok.strip_prefix("user:") {
-            parts.user = val;
-        } else if let Some(val) = tok.strip_prefix("trxid:") {
-            parts.trxid = val;
-        } else if let Some(val) = tok.strip_prefix("stmt:") {
-            parts.stmt = val;
-        } else if tok == "appname:" {
-            if let Some(next) = iter.peek() {
-                if (*next).starts_with("ip:::") {
-                    let nexttok = iter.next().unwrap();
-                    let ippart = nexttok.trim_start_matches("ip:::");
-                    let ipclean = ippart.trim_start_matches("ffff:");
-                    parts.ip = Some(ipclean);
-                    parts.appname = "";
-                } else {
-                    let val = iter.next().unwrap();
-                    parts.appname = val;
-                }
-            } else {
-                parts.appname = "";
-            }
-        } else if let Some(val) = tok.strip_prefix("appname:") {
-            if val.starts_with("ip:::") {
-                let ippart = val.trim_start_matches("ip:::");
-                let ipclean = ippart.trim_start_matches("ffff:");
-                parts.ip = Some(ipclean);
-                parts.appname = "";
-            } else {
-                parts.appname = val;
-            }
-        }
-    }
-
-    parts
-}
-
-// 辅助：从 body 末尾反向提取数值指标（EXEC_ID, ROWCOUNT, EXECTIME）
-fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
-    let mut execute_id: Option<u64> = None;
-    let mut row_count: Option<u64> = None;
-    let mut execute_time_ms: Option<u64> = None;
-
-    let body_str = body;
-    let mut search_end = body_str.len();
-
-    if let Some(pos) = body_str[..search_end].rfind("EXEC_ID:") {
-        let start = pos + "EXEC_ID:".len();
-        if let Some((v, _)) = parse_digits_forward(body_str, start) {
-            execute_id = Some(v);
-        }
-        search_end = pos;
-    }
-
-    if let Some(pos) = body_str[..search_end].rfind("ROWCOUNT:") {
-        let start = pos + "ROWCOUNT:".len();
-        if let Some((v, _)) = parse_digits_forward(body_str, start) {
-            row_count = Some(v);
-        }
-        search_end = pos;
-    }
-
-    if let Some(pos) = body_str[..search_end].rfind("EXECTIME:") {
-        let start = pos + "EXECTIME:".len();
-        if let Some((v, _)) = parse_digits_forward(body_str, start) {
-            execute_time_ms = Some(v);
-        }
-    }
-
-    (execute_time_ms, row_count, execute_id)
-}
-
-/// 解析单条记录。
-///
-/// 该函数将一条日志记录文本解析为 `ParsedRecord` 结构体。
-/// 返回的结构体中的所有字符串字段都是对输入文本的引用，不会产生额外的内存分配。
-///
-/// # 参数
-///
-/// * `rec` - 单条日志记录的文本（通常由 `RecordSplitter` 或相关函数产生）
-///
-/// # 返回值
-///
-/// 返回解析后的 `ParsedRecord`，所有字段都是对输入文本的引用。
-///
-/// # 示例
-///
-/// ```rust
-/// use dm_database_parser_sqllog::parse_record;
-///
-/// let record_text = "2025-08-12 10:57:09.562 (EP[0] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) SELECT 1";
-/// let parsed = parse_record(record_text);
-/// println!("用户: {}, 事务ID: {}", parsed.user, parsed.trxid);
-/// ```
-pub fn parse_record(rec: &'_ str) -> ParsedRecord<'_> {
-    // 1) 将记录分割为 ts / meta_raw / body
-    let (ts, meta_raw, body) = split_ts_meta_body(rec);
-
-    // 2) 解析 meta 字段
-    let meta = parse_meta(meta_raw);
-
-    // 3) 从 body 解析数值指标
-    let (execute_time_ms, row_count, execute_id) = parse_body_metrics(body);
-
-    ParsedRecord {
-        ts,
-        meta_raw,
-        ep: meta.ep,
-        sess: meta.sess,
-        thrd: meta.thrd,
-        user: meta.user,
-        trxid: meta.trxid,
-        stmt: meta.stmt,
-        appname: meta.appname,
-        ip: meta.ip,
+    Ok(Sqllog {
+        ts: ts.to_string(),
+        meta,
         body,
-        execute_time_ms,
+        indicators,
+    })
+}
+
+/// 构建完整的 body（包含所有继续行）
+#[inline]
+fn build_body(first_line: &str, body_start: usize, continuation_lines: &[&str]) -> String {
+    if continuation_lines.is_empty() {
+        // 只有单行
+        if body_start < first_line.len() {
+            first_line[body_start..].to_string()
+        } else {
+            String::new()
+        }
+    } else {
+        // 有多行，计算总容量并预分配
+        let has_first_part = body_start < first_line.len();
+        let first_part_len = if has_first_part {
+            first_line.len() - body_start
+        } else {
+            0
+        };
+
+        let newline_count = if has_first_part {
+            continuation_lines.len()
+        } else {
+            continuation_lines.len() - 1
+        };
+
+        let total_len = first_part_len
+            + continuation_lines.iter().map(|s| s.len()).sum::<usize>()
+            + newline_count;
+
+        let mut result = String::with_capacity(total_len);
+
+        if has_first_part {
+            result.push_str(&first_line[body_start..]);
+            for line in continuation_lines {
+                result.push('\n');
+                result.push_str(line);
+            }
+        } else {
+            // 第一行为空，从第一个 continuation_line 开始
+            result.push_str(continuation_lines[0]);
+            for line in &continuation_lines[1..] {
+                result.push('\n');
+                result.push_str(line);
+            }
+        }
+
+        result
+    }
+}
+
+/// 从 full_body 中提取 SQL 部分（移除 indicators）
+#[inline]
+fn extract_sql_body(full_body: &str) -> String {
+    // 使用预定义的 INDICATOR_PATTERNS 避免每次创建数组
+    INDICATOR_PATTERNS
+        .iter()
+        .filter_map(|pattern| full_body.find(pattern))
+        .min()
+        .map(|pos| full_body[..pos].trim_end().to_string())
+        .unwrap_or_else(|| full_body.to_string())
+}
+
+/// 解析 meta 字符串
+fn parse_meta(meta_str: &str) -> Result<MetaParts, ParseError> {
+    let fields: Vec<&str> = meta_str.split(' ').collect();
+
+    if fields.len() < 7 {
+        return Err(ParseError::InsufficientMetaFields(fields.len()));
+    }
+
+    // 解析 EP
+    let ep = parse_ep_field(fields[0])?;
+
+    // 解析必需字段 - 使用静态常量避免字符串字面量重复
+    let sess_id = extract_field_value(fields[1], SESS_PREFIX)?;
+    let thrd_id = extract_field_value(fields[2], THRD_PREFIX)?;
+    let username = extract_field_value(fields[3], USER_PREFIX)?;
+    let trxid = extract_field_value(fields[4], TRXID_PREFIX)?;
+    let statement = extract_field_value(fields[5], STMT_PREFIX)?;
+    let appname = extract_field_value(fields[6], APPNAME_PREFIX)?;
+
+    // 可选的 client_ip
+    let client_ip = fields
+        .get(7)
+        .map(|field| extract_field_value(field, IP_PREFIX))
+        .transpose()?
+        .unwrap_or_default();
+
+    Ok(MetaParts {
+        ep,
+        sess_id,
+        thrd_id,
+        username,
+        trxid,
+        statement,
+        appname,
+        client_ip,
+    })
+}
+
+/// 解析 EP 字段
+#[inline]
+fn parse_ep_field(ep_str: &str) -> Result<u8, ParseError> {
+    if !ep_str.starts_with("EP[") || !ep_str.ends_with(']') {
+        return Err(ParseError::InvalidEpFormat(ep_str.to_string()));
+    }
+
+    let ep_num = &ep_str[3..ep_str.len() - 1];
+    ep_num
+        .parse::<u8>()
+        .map_err(|_| ParseError::EpParseError(ep_num.to_string()))
+}
+
+/// 从字段中提取值
+#[inline]
+fn extract_field_value(field: &str, prefix: &str) -> Result<String, ParseError> {
+    field
+        .strip_prefix(prefix)
+        .map(|s| s.to_string())
+        .ok_or_else(|| ParseError::InvalidFieldFormat {
+            expected: prefix.to_string(),
+            actual: field.to_string(),
+        })
+}
+
+/// 解析 indicators 部分
+fn parse_indicators(body: &str) -> Result<IndicatorsParts, ParseError> {
+    // 使用预定义的静态常量，避免每次创建字符串
+    let exec_time_str = extract_indicator(body, EXECTIME_PREFIX, EXECTIME_SUFFIX)?;
+    let row_count_str = extract_indicator(body, ROWCOUNT_PREFIX, ROWCOUNT_SUFFIX)?;
+    let exec_id_str = extract_indicator(body, EXEC_ID_PREFIX, EXEC_ID_SUFFIX)?;
+
+    let execute_time = exec_time_str.parse::<f32>().map_err(|_| {
+        ParseError::IndicatorsParseError(format!("执行时间解析失败: {}", exec_time_str))
+    })?;
+
+    let row_count = row_count_str.parse::<u32>().map_err(|_| {
+        ParseError::IndicatorsParseError(format!("行数解析失败: {}", row_count_str))
+    })?;
+
+    let execute_id = exec_id_str.parse::<i64>().map_err(|_| {
+        ParseError::IndicatorsParseError(format!("执行 ID 解析失败: {}", exec_id_str))
+    })?;
+
+    Ok(IndicatorsParts {
+        execute_time,
         row_count,
         execute_id,
-    }
+    })
+}
+
+/// 提取 indicator 值
+#[inline]
+fn extract_indicator<'a>(text: &'a str, prefix: &str, suffix: &str) -> Result<&'a str, ParseError> {
+    let start_pos = text
+        .find(prefix)
+        .ok_or_else(|| ParseError::IndicatorsParseError(format!("未找到 {}", prefix)))?
+        + prefix.len();
+
+    let remaining = &text[start_pos..];
+    let end_offset = remaining
+        .find(suffix)
+        .ok_or_else(|| ParseError::IndicatorsParseError(format!("未找到 {}", suffix)))?;
+
+    Ok(remaining[..end_offset].trim())
 }
 
 #[cfg(test)]
@@ -655,172 +454,706 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_split_by_ts_records() {
-        let log_text = "2023-10-05 14:23:45.123 (EP[12345] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp)\nSELECT * FROM users
-2023-10-05 14:24:00.456 (EP[12346] sess:2 thrd:2 user:guest trxid:0 stmt:2 appname:MyApp)\nINSERT INTO orders VALUES (1, 'item');\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-
-        assert_eq!(records.len(), 2);
-        assert_eq!(errors.len(), 0);
-    }
-
-    #[test]
-    fn test_split_with_leading_errors() {
-        let log_text = "garbage line 1\ngarbage line 2\n2023-10-05 14:23:45.123 (EP[12345] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
+    fn test_single_line_record() {
+        let input = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1";
+        let records = parse_records_from_string(input);
 
         assert_eq!(records.len(), 1);
-        assert_eq!(errors.len(), 2);
-        assert!(records[0].contains("SELECT 1"));
+        assert_eq!(records[0].lines.len(), 1);
+        assert_eq!(records[0].start_line(), input);
+        assert!(!records[0].has_continuation_lines());
     }
 
     #[test]
-    fn test_record_splitter_iterator() {
-        let log_text = "garbage\n2023-10-05 14:23:45.123 (EP[1] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) foo\n2023-10-05 14:23:46.456 (EP[2] sess:2 thrd:2 user:guest trxid:0 stmt:2 appname:MyApp) bar\n";
-        let it = RecordSplitter::new(log_text);
-        assert_eq!(it.leading_errors_slice().unwrap().trim(), "garbage");
-        let v: Vec<&str> = it.collect();
-        assert_eq!(v.len(), 2);
-    }
+    fn test_multi_line_record() {
+        let input = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *
+FROM users
+WHERE id = 1"#;
 
-    #[test]
-    fn test_parse_simple_log_sample() {
-        let log_text = "2025-08-12 10:57:09.562 (EP[0] sess:0x7fb24f392a30 thrd:757794 user:HBTCOMS_V3_PROD trxid:688489653 stmt:0x7fb236077b70 appname: ip:::ffff:10.3.100.68) EXECTIME: 0ms ROWCOUNT: 1 EXEC_ID: 289655185\n2025-08-12 10:57:09.562 (EP[0] sess:0x7fb24f392a30 thrd:757794 user:HBTCOMS_V3_PROD trxid:0 stmt:NULL appname:) TRX: START\n";
+        let records = parse_records_from_string(input);
 
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        assert_eq!(errors.len(), 0);
-        assert_eq!(records.len(), 2);
-
-        let r0 = parse_record(records[0]);
-        assert_eq!(r0.execute_time_ms, Some(0));
-        assert_eq!(r0.row_count, Some(1));
-        assert_eq!(r0.execute_id, Some(289655185));
-        assert_eq!(r0.ip, Some("10.3.100.68"));
-        assert_eq!(r0.appname, "");
-
-        let r1 = parse_record(records[1]);
-        assert!(r1.body.contains("TRX: START"));
-    }
-
-    #[test]
-    fn test_missing_sess_field_should_be_error() {
-        // 缺少 sess: 字段 - 找不到有效记录，所有内容都是前导错误
-        let log_text = "garbage1\n2023-10-05 14:23:45.123 (EP[12345] thrd:1 user:admin trxid:0 stmt:1 appname:MyApp)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        assert_eq!(records.len(), 0);
-        // 如果找不到第一个有效记录，leading_errors_slice 返回 None，所以 errors 为空
-        // 但整个文本都没有有效记录，所以 records 也为空
-        assert_eq!(errors.len(), 0);
-    }
-
-    #[test]
-    fn test_missing_thrd_field_should_be_error() {
-        // 缺少 thrd: 字段 - 找不到有效记录
-        let log_text = "garbage2\n2023-10-05 14:23:45.123 (EP[12345] sess:1 user:admin trxid:0 stmt:1 appname:MyApp)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        assert_eq!(records.len(), 0);
-        assert_eq!(errors.len(), 0); // 找不到第一个有效记录时，leading_errors_slice 返回 None
-    }
-
-    #[test]
-    fn test_missing_user_field_should_be_error() {
-        // 缺少 user: 字段 - 找不到有效记录
-        let log_text = "garbage3\n2023-10-05 14:23:45.123 (EP[12345] sess:1 thrd:1 trxid:0 stmt:1 appname:MyApp)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        assert_eq!(records.len(), 0);
-        assert_eq!(errors.len(), 0);
-    }
-
-    #[test]
-    fn test_missing_trxid_field_should_be_error() {
-        // 缺少 trxid: 字段 - 找不到有效记录
-        let log_text = "garbage4\n2023-10-05 14:23:45.123 (EP[12345] sess:1 thrd:1 user:admin stmt:1 appname:MyApp)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        assert_eq!(records.len(), 0);
-        assert_eq!(errors.len(), 0);
-    }
-
-    #[test]
-    fn test_missing_stmt_field_should_be_error() {
-        // 缺少 stmt: 字段 - 找不到有效记录
-        let log_text = "garbage5\n2023-10-05 14:23:45.123 (EP[12345] sess:1 thrd:1 user:admin trxid:0 appname:MyApp)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        assert_eq!(records.len(), 0);
-        assert_eq!(errors.len(), 0);
-    }
-
-    #[test]
-    fn test_missing_appname_field_should_be_error() {
-        // 缺少 appname: 字段 - 找不到有效记录
-        let log_text = "garbage6\n2023-10-05 14:23:45.123 (EP[12345] sess:1 thrd:1 user:admin trxid:0 stmt:1)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        assert_eq!(records.len(), 0);
-        assert_eq!(errors.len(), 0);
-    }
-
-    #[test]
-    fn test_wrong_field_order_should_be_error() {
-        // 字段顺序错误：sess 和 thrd 交换 - 找不到有效记录
-        let log_text = "garbage\n2023-10-05 14:23:45.123 (EP[12345] thrd:1 sess:1 user:admin trxid:0 stmt:1 appname:MyApp)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        assert_eq!(records.len(), 0);
-        assert_eq!(errors.len(), 0);
-    }
-
-    #[test]
-    fn test_invalid_timestamp_format_should_be_error() {
-        // 时间戳格式错误（缺少毫秒部分） - 找不到有效记录
-        let log_text = "garbage\n2023-10-05 14:23:45 (EP[12345] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        assert_eq!(records.len(), 0);
-        assert_eq!(errors.len(), 0);
-    }
-
-    #[test]
-    fn test_invalid_timestamp_length_should_be_error() {
-        // 时间戳长度不足 - 找不到有效记录
-        let log_text = "garbage\n2023-10-05 14:23:45.1 (EP[12345] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        assert_eq!(records.len(), 0);
-        assert_eq!(errors.len(), 0);
-    }
-
-    #[test]
-    fn test_missing_space_after_timestamp_should_be_error() {
-        // 时间戳后没有空格 - 找不到有效记录
-        let log_text = "garbage\n2023-10-05 14:23:45.123(EP[12345] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        assert_eq!(records.len(), 0);
-        assert_eq!(errors.len(), 0);
-    }
-
-    #[test]
-    fn test_missing_ep_bracket_should_be_error() {
-        // EP[ 后没有闭合括号 ] - 找不到有效记录
-        let log_text = "garbage\n2023-10-05 14:23:45.123 (EP[12345 sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        assert_eq!(records.len(), 0);
-        assert_eq!(errors.len(), 0);
-    }
-
-    #[test]
-    fn test_no_timestamp_line_should_be_error() {
-        // 没有时间戳的普通行
-        let log_text = "garbage line 1\ngarbage line 2\njust a normal line\n2023-10-05 14:23:45.123 (EP[12345] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp)\nSELECT 1\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
         assert_eq!(records.len(), 1);
-        assert_eq!(errors.len(), 3); // 3 行错误内容
+        assert_eq!(records[0].lines.len(), 3);
+        assert!(records[0].has_continuation_lines());
+        assert!(records[0].start_line().starts_with("2025-08-12"));
+        assert_eq!(records[0].all_lines()[1], "FROM users");
+        assert_eq!(records[0].all_lines()[2], "WHERE id = 1");
     }
 
     #[test]
-    fn test_mixed_valid_and_invalid_records() {
-        // 混合有效和无效记录
-        // 注意：next() 方法只检查时间戳，不验证字段，所以所有有时间戳的行都会被当作记录
-        let log_text = "2023-10-05 14:23:45.123 (EP[12345] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp)\nSELECT 1\ninvalid line\n2023-10-05 14:24:00.456 (EP[12346] sess:2 thrd:2 user:guest trxid:0 stmt:2 appname:MyApp)\nINSERT 1\n2023-10-05 14:24:01.789 (EP[12347] sess:3)\ninvalid record\n";
-        let (records, errors) = split_by_ts_records_with_errors(log_text);
-        // next() 方法只检查时间戳，所以所有有时间戳的行都会被当作记录（即使字段不完整）
-        assert_eq!(records.len(), 3);
-        // invalid line 会被包含在第一个和第二个记录之间，所以 errors 中只有前导错误（如果有）
-        assert_eq!(errors.len(), 0); // 第一个记录有效，所以没有前导错误
+    fn test_multiple_records() {
+        let input = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1
+2025-08-12 10:57:10.000 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) INSERT INTO table"#;
+
+        let records = parse_records_from_string(input);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].lines.len(), 1);
+        assert_eq!(records[1].lines.len(), 1);
+    }
+
+    #[test]
+    fn test_multiple_records_with_continuation() {
+        let input = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *
+FROM table1
+WHERE id = 1
+2025-08-12 10:57:10.000 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) UPDATE table2
+SET name = 'test'
+WHERE id = 2"#;
+
+        let records = parse_records_from_string(input);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].lines.len(), 3);
+        assert_eq!(records[1].lines.len(), 3);
+        assert!(records[0].has_continuation_lines());
+        assert!(records[1].has_continuation_lines());
+    }
+
+    #[test]
+    fn test_skip_invalid_lines_at_start() {
+        let input = r#"Some garbage line
+Another invalid line
+2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1"#;
+
+        let records = parse_records_from_string(input);
+
+        assert_eq!(records.len(), 1);
+        assert!(records[0].start_line().starts_with("2025-08-12"));
+    }
+
+    #[test]
+    fn test_empty_input() {
+        let input = "";
+        let records = parse_records_from_string(input);
+        assert_eq!(records.len(), 0);
+    }
+
+    #[test]
+    fn test_full_content() {
+        let input = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *
+FROM users
+WHERE id = 1"#;
+
+        let records = parse_records_from_string(input);
+        assert_eq!(records[0].full_content(), input);
+    }
+
+    #[test]
+    fn test_parse_record_single_line() {
+        let lines = vec![
+            "2025-08-12 10:57:09.548 (EP[0] sess:0x123 thrd:456 user:alice trxid:789 stmt:0x999 appname:app ip:::ffff:10.0.0.1) SELECT 1",
+        ];
+
+        let result = parse_record(&lines);
+        assert!(result.is_ok());
+
+        let sqllog = result.unwrap();
+        assert_eq!(sqllog.ts, "2025-08-12 10:57:09.548");
+        assert_eq!(sqllog.meta.ep, 0);
+        assert_eq!(sqllog.meta.sess_id, "0x123");
+        assert_eq!(sqllog.meta.thrd_id, "456");
+        assert_eq!(sqllog.meta.username, "alice");
+        assert_eq!(sqllog.meta.trxid, "789");
+        assert_eq!(sqllog.meta.statement, "0x999");
+        assert_eq!(sqllog.meta.appname, "app");
+        assert_eq!(sqllog.meta.client_ip, "10.0.0.1");
+        assert_eq!(sqllog.body, "SELECT 1");
+        assert!(sqllog.indicators.is_none());
+    }
+
+    #[test]
+    fn test_parse_record_with_indicators() {
+        let lines = vec![
+            "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1 EXECTIME: 10(ms) ROWCOUNT: 5(rows) EXEC_ID: 12345.",
+        ];
+
+        let result = parse_record(&lines);
+        assert!(result.is_ok());
+
+        let sqllog = result.unwrap();
+        assert_eq!(sqllog.body, "SELECT 1");
+
+        assert!(sqllog.indicators.is_some());
+        let indicators = sqllog.indicators.unwrap();
+        assert_eq!(indicators.execute_time, 10.0);
+        assert_eq!(indicators.row_count, 5);
+        assert_eq!(indicators.execute_id, 12345);
+    }
+
+    #[test]
+    fn test_parse_record_multiline() {
+        let lines = vec![
+            "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *",
+            "FROM users",
+            "WHERE id = 1",
+        ];
+
+        let result = parse_record(&lines);
+        assert!(result.is_ok());
+
+        let sqllog = result.unwrap();
+        assert_eq!(sqllog.body, "SELECT *\nFROM users\nWHERE id = 1");
+    }
+
+    #[test]
+    fn test_parse_record_empty_input() {
+        let lines: Vec<&str> = vec![];
+        let result = parse_record(&lines);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ParseError::EmptyInput));
+    }
+
+    #[test]
+    fn test_parse_record_invalid_format() {
+        let lines = vec!["not a valid log line"];
+        let result = parse_record(&lines);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ParseError::InvalidRecordStartLine
+        ));
+    }
+
+    #[test]
+    fn test_parse_record_without_ip() {
+        let lines = vec![
+            "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1",
+        ];
+
+        let result = parse_record(&lines);
+        assert!(result.is_ok());
+
+        let sqllog = result.unwrap();
+        assert_eq!(sqllog.meta.client_ip, "");
+    }
+
+    #[test]
+    fn test_record_parse_to_sqllog() {
+        let input = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1";
+        let records = parse_records_from_string(input);
+
+        assert_eq!(records.len(), 1);
+        let sqllog = records[0].parse_to_sqllog().unwrap();
+        assert_eq!(sqllog.meta.username, "alice");
+        assert_eq!(sqllog.body, "SELECT 1");
+    }
+
+    #[test]
+    fn test_sqllog_parser() {
+        let input = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1
+2025-08-12 10:57:10.000 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) INSERT INTO table"#;
+
+        let cursor = std::io::Cursor::new(input.as_bytes());
+        let parser = SqllogParser::new(cursor);
+        let sqllogs: Vec<_> = parser.collect();
+
+        assert_eq!(sqllogs.len(), 2);
+        assert!(sqllogs[0].is_ok());
+        assert!(sqllogs[1].is_ok());
+
+        let sqllog1 = sqllogs[0].as_ref().unwrap();
+        let sqllog2 = sqllogs[1].as_ref().unwrap();
+
+        assert_eq!(sqllog1.meta.username, "alice");
+        assert_eq!(sqllog2.meta.username, "bob");
+    }
+
+    #[test]
+    fn test_parse_sqllogs_from_string() {
+        let input = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *
+FROM users
+2025-08-12 10:57:10.000 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) UPDATE table"#;
+
+        let results = parse_sqllogs_from_string(input);
+        assert_eq!(results.len(), 2);
+
+        let sqllog1 = results[0].as_ref().unwrap();
+        assert_eq!(sqllog1.body, "SELECT *\nFROM users");
+        assert_eq!(sqllog1.meta.username, "alice");
+    }
+
+    // ==================== 辅助函数测试 ====================
+
+    #[test]
+    fn test_build_body_single_line() {
+        let first_line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1";
+        let closing_paren = first_line.find(')').unwrap();
+        let body_start = closing_paren + BODY_OFFSET;
+        let continuation: &[&str] = &[];
+
+        let body = build_body(first_line, body_start, continuation);
+        assert_eq!(body, "SELECT 1");
+    }
+
+    #[test]
+    fn test_build_body_multi_line() {
+        let first_line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *";
+        let closing_paren = first_line.find(')').unwrap();
+        let body_start = closing_paren + BODY_OFFSET;
+        let continuation = &["FROM users", "WHERE id = 1"];
+
+        let body = build_body(first_line, body_start, continuation);
+        assert_eq!(body, "SELECT *\nFROM users\nWHERE id = 1");
+    }
+
+    #[test]
+    fn test_build_body_empty_first_line() {
+        let first_line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app)";
+        let body_start = first_line.len();
+        let continuation = &["SELECT 1"];
+
+        let body = build_body(first_line, body_start, continuation);
+        assert_eq!(body, "SELECT 1");
+    }
+
+    #[test]
+    fn test_extract_sql_body_with_exectime() {
+        let full_body = "SELECT 1 EXECTIME: 10(ms) ROWCOUNT: 5(rows) EXEC_ID: 12345.";
+        let sql_body = extract_sql_body(full_body);
+        assert_eq!(sql_body, "SELECT 1");
+    }
+
+    #[test]
+    fn test_extract_sql_body_with_rowcount_first() {
+        let full_body = "SELECT 1 ROWCOUNT: 5(rows) EXECTIME: 10(ms) EXEC_ID: 12345.";
+        let sql_body = extract_sql_body(full_body);
+        assert_eq!(sql_body, "SELECT 1");
+    }
+
+    #[test]
+    fn test_extract_sql_body_without_indicators() {
+        let full_body = "SELECT 1 FROM users";
+        let sql_body = extract_sql_body(full_body);
+        assert_eq!(sql_body, "SELECT 1 FROM users");
+    }
+
+    #[test]
+    fn test_parse_ep_field_valid() {
+        let result = parse_ep_field("EP[0]");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+
+        let result = parse_ep_field("EP[15]");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 15);
+    }
+
+    #[test]
+    fn test_parse_ep_field_invalid_format() {
+        let result = parse_ep_field("EP0");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ParseError::InvalidEpFormat(_)
+        ));
+
+        let result = parse_ep_field("[0]");
+        assert!(result.is_err());
+
+        let result = parse_ep_field("EP[");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_ep_field_invalid_number() {
+        let result = parse_ep_field("EP[abc]");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ParseError::EpParseError(_)));
+
+        let result = parse_ep_field("EP[256]"); // 超过 u8 范围
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_field_value_valid() {
+        let result = extract_field_value("sess:123", "sess:");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "123");
+
+        let result = extract_field_value("user:alice", "user:");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "alice");
+    }
+
+    #[test]
+    fn test_extract_field_value_invalid_prefix() {
+        let result = extract_field_value("sess:123", "user:");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ParseError::InvalidFieldFormat { .. }
+        ));
+    }
+
+    #[test]
+    fn test_extract_field_value_empty_value() {
+        let result = extract_field_value("sess:", "sess:");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_parse_meta_valid() {
+        let meta_str = "EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app";
+        let result = parse_meta(meta_str);
+        assert!(result.is_ok());
+
+        let meta = result.unwrap();
+        assert_eq!(meta.ep, 0);
+        assert_eq!(meta.sess_id, "123");
+        assert_eq!(meta.thrd_id, "456");
+        assert_eq!(meta.username, "alice");
+        assert_eq!(meta.trxid, "789");
+        assert_eq!(meta.statement, "999");
+        assert_eq!(meta.appname, "app");
+        assert_eq!(meta.client_ip, "");
+    }
+
+    #[test]
+    fn test_parse_meta_with_ip() {
+        let meta_str =
+            "EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app ip:::ffff:10.0.0.1";
+        let result = parse_meta(meta_str);
+        assert!(result.is_ok());
+
+        let meta = result.unwrap();
+        assert_eq!(meta.client_ip, "10.0.0.1");
+    }
+
+    #[test]
+    fn test_parse_meta_insufficient_fields() {
+        let meta_str = "EP[0] sess:123 thrd:456";
+        let result = parse_meta(meta_str);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ParseError::InsufficientMetaFields(3)
+        ));
+    }
+
+    #[test]
+    fn test_parse_meta_invalid_ep() {
+        let meta_str = "EP0 sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app";
+        let result = parse_meta(meta_str);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ParseError::InvalidEpFormat(_)
+        ));
+    }
+
+    #[test]
+    fn test_parse_indicators_valid() {
+        let body = "SELECT 1 EXECTIME: 10.5(ms) ROWCOUNT: 100(rows) EXEC_ID: 12345.";
+        let result = parse_indicators(body);
+        assert!(result.is_ok());
+
+        let indicators = result.unwrap();
+        assert_eq!(indicators.execute_time, 10.5);
+        assert_eq!(indicators.row_count, 100);
+        assert_eq!(indicators.execute_id, 12345);
+    }
+
+    #[test]
+    fn test_parse_indicators_integer_exectime() {
+        let body = "SELECT 1 EXECTIME: 10(ms) ROWCOUNT: 5(rows) EXEC_ID: 12345.";
+        let result = parse_indicators(body);
+        assert!(result.is_ok());
+
+        let indicators = result.unwrap();
+        assert_eq!(indicators.execute_time, 10.0);
+    }
+
+    #[test]
+    fn test_parse_indicators_missing_exectime() {
+        let body = "SELECT 1 ROWCOUNT: 5(rows) EXEC_ID: 12345.";
+        let result = parse_indicators(body);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ParseError::IndicatorsParseError(_)
+        ));
+    }
+
+    #[test]
+    fn test_parse_indicators_missing_rowcount() {
+        let body = "SELECT 1 EXECTIME: 10(ms) EXEC_ID: 12345.";
+        let result = parse_indicators(body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_indicators_missing_exec_id() {
+        let body = "SELECT 1 EXECTIME: 10(ms) ROWCOUNT: 5(rows)";
+        let result = parse_indicators(body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_indicators_invalid_exectime_format() {
+        let body = "SELECT 1 EXECTIME: abc(ms) ROWCOUNT: 5(rows) EXEC_ID: 12345.";
+        let result = parse_indicators(body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_indicators_invalid_rowcount_format() {
+        let body = "SELECT 1 EXECTIME: 10(ms) ROWCOUNT: xyz(rows) EXEC_ID: 12345.";
+        let result = parse_indicators(body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_indicators_invalid_exec_id_format() {
+        let body = "SELECT 1 EXECTIME: 10(ms) ROWCOUNT: 5(rows) EXEC_ID: abc.";
+        let result = parse_indicators(body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_indicator_valid() {
+        let text = "SELECT 1 EXECTIME: 10(ms) ROWCOUNT: 5(rows)";
+        let result = extract_indicator(text, "EXECTIME: ", "(ms)");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "10");
+
+        let result = extract_indicator(text, "ROWCOUNT: ", "(rows)");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "5");
+    }
+
+    #[test]
+    fn test_extract_indicator_missing_prefix() {
+        let text = "SELECT 1 ROWCOUNT: 5(rows)";
+        let result = extract_indicator(text, "EXECTIME: ", "(ms)");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_indicator_missing_suffix() {
+        let text = "SELECT 1 EXECTIME: 10 ROWCOUNT: 5(rows)";
+        let result = extract_indicator(text, "EXECTIME: ", "(ms)");
+        assert!(result.is_err());
+    }
+
+    // ==================== RecordParser 边界测试 ====================
+
+    #[test]
+    fn test_record_parser_empty_input() {
+        let input = "";
+        let cursor = std::io::Cursor::new(input.as_bytes());
+        let parser = RecordParser::new(cursor);
+        let records: Vec<_> = parser.collect();
+        assert_eq!(records.len(), 0);
+    }
+
+    #[test]
+    fn test_record_parser_only_invalid_lines() {
+        let input = r#"garbage line 1
+garbage line 2
+not a valid record"#;
+        let cursor = std::io::Cursor::new(input.as_bytes());
+        let parser = RecordParser::new(cursor);
+        let records: Vec<_> = parser.collect();
+        assert_eq!(records.len(), 0);
+    }
+
+    #[test]
+    fn test_record_parser_mixed_valid_invalid() {
+        let input = r#"garbage line
+2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1
+more garbage
+2025-08-12 10:57:10.000 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2
+invalid line again"#;
+
+        let cursor = std::io::Cursor::new(input.as_bytes());
+        let parser = RecordParser::new(cursor);
+        let records: Vec<_> = parser.collect();
+
+        assert_eq!(records.len(), 2);
+        assert!(records[0].is_ok());
+        assert!(records[1].is_ok());
+    }
+
+    #[test]
+    fn test_record_parser_windows_line_endings() {
+        let input = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1\r\n2025-08-12 10:57:10.000 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2\r\n";
+
+        let cursor = std::io::Cursor::new(input.as_bytes());
+        let parser = RecordParser::new(cursor);
+        let records: Vec<_> = parser.collect();
+
+        assert_eq!(records.len(), 2);
+        let record1 = records[0].as_ref().unwrap();
+        let record2 = records[1].as_ref().unwrap();
+
+        // 验证换行符已被正确移除
+        assert!(!record1.start_line().contains('\r'));
+        assert!(!record2.start_line().contains('\r'));
+    }
+
+    #[test]
+    fn test_record_parser_unix_line_endings() {
+        let input = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1\n2025-08-12 10:57:10.000 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2\n";
+
+        let cursor = std::io::Cursor::new(input.as_bytes());
+        let parser = RecordParser::new(cursor);
+        let records: Vec<_> = parser.collect();
+
+        assert_eq!(records.len(), 2);
+    }
+
+    // ==================== SqllogParser 边界测试 ====================
+
+    #[test]
+    fn test_sqllog_parser_empty_input() {
+        let input = "";
+        let cursor = std::io::Cursor::new(input.as_bytes());
+        let parser = SqllogParser::new(cursor);
+        let sqllogs: Vec<_> = parser.collect();
+        assert_eq!(sqllogs.len(), 0);
+    }
+
+    #[test]
+    fn test_sqllog_parser_mixed_valid_invalid() {
+        let input = r#"garbage
+2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1
+2025-08-12 10:57:10.000 (EP[999] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2"#;
+
+        let cursor = std::io::Cursor::new(input.as_bytes());
+        let parser = SqllogParser::new(cursor);
+        let sqllogs: Vec<_> = parser.collect();
+
+        assert_eq!(sqllogs.len(), 2);
+        assert!(sqllogs[0].is_ok());
+        // EP[999] 超过 u8 范围，应该解析失败
+        assert!(sqllogs[1].is_err());
+    }
+
+    // ==================== 边界情况和错误处理 ====================
+
+    #[test]
+    fn test_parse_record_line_too_short() {
+        // 这行太短，is_record_start_line 会拒绝
+        let lines = vec!["2025-08-12 10:57:09"];
+        let result = parse_record(&lines);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ParseError::InvalidRecordStartLine
+        ));
+    }
+
+    #[test]
+    fn test_parse_record_missing_closing_paren() {
+        // 缺少右括号，is_record_start_line 会拒绝
+        let lines = vec![
+            "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app SELECT 1",
+        ];
+        let result = parse_record(&lines);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ParseError::InvalidRecordStartLine
+        ));
+    }
+
+    #[test]
+    fn test_parse_record_insufficient_meta_fields() {
+        // meta 字段不足，is_record_start_line 会拒绝
+        let lines = vec!["2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456) SELECT 1"];
+        let result = parse_record(&lines);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ParseError::InvalidRecordStartLine
+        ));
+    }
+
+    #[test]
+    fn test_parse_record_with_hex_values() {
+        let lines = vec![
+            "2025-08-12 10:57:09.548 (EP[0] sess:0xABCD thrd:0x1234 user:alice trxid:0x789 stmt:0xFFFF appname:app) SELECT 1",
+        ];
+
+        let result = parse_record(&lines);
+        assert!(result.is_ok());
+
+        let sqllog = result.unwrap();
+        assert_eq!(sqllog.meta.sess_id, "0xABCD");
+        assert_eq!(sqllog.meta.thrd_id, "0x1234");
+        assert_eq!(sqllog.meta.trxid, "0x789");
+        assert_eq!(sqllog.meta.statement, "0xFFFF");
+    }
+
+    #[test]
+    fn test_parse_record_multiline_with_indicators() {
+        let lines = vec![
+            "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *",
+            "FROM users",
+            "WHERE id = 1 EXECTIME: 15.5(ms) ROWCOUNT: 10(rows) EXEC_ID: 99999.",
+        ];
+
+        let result = parse_record(&lines);
+        assert!(result.is_ok());
+
+        let sqllog = result.unwrap();
+        assert_eq!(sqllog.body, "SELECT *\nFROM users\nWHERE id = 1");
+
+        assert!(sqllog.indicators.is_some());
+        let indicators = sqllog.indicators.unwrap();
+        assert_eq!(indicators.execute_time, 15.5);
+        assert_eq!(indicators.row_count, 10);
+        assert_eq!(indicators.execute_id, 99999);
+    }
+
+    #[test]
+    fn test_parse_record_empty_body() {
+        let lines = vec![
+            "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app)",
+        ];
+
+        let result = parse_record(&lines);
+        assert!(result.is_ok());
+
+        let sqllog = result.unwrap();
+        assert_eq!(sqllog.body, "");
+    }
+
+    #[test]
+    fn test_parse_record_special_characters_in_fields() {
+        let lines = vec![
+            "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:user@domain.com trxid:789 stmt:999 appname:my-app-v1.0) SELECT 1",
+        ];
+
+        let result = parse_record(&lines);
+        assert!(result.is_ok());
+
+        let sqllog = result.unwrap();
+        assert_eq!(sqllog.meta.username, "user@domain.com");
+        assert_eq!(sqllog.meta.appname, "my-app-v1.0");
+    }
+
+    #[test]
+    fn test_record_equality() {
+        let record1 = Record::new("line1".to_string());
+        let mut record2 = Record::new("line1".to_string());
+
+        assert_eq!(record1, record2);
+
+        record2.add_line("line2".to_string());
+        assert_ne!(record1, record2);
+    }
+
+    #[test]
+    fn test_record_clone() {
+        let mut record1 = Record::new("line1".to_string());
+        record1.add_line("line2".to_string());
+
+        let record2 = record1.clone();
+
+        assert_eq!(record1, record2);
+        assert_eq!(record1.lines, record2.lines);
     }
 }

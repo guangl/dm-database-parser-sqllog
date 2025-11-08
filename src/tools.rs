@@ -1,232 +1,345 @@
 use once_cell::sync::Lazy;
-use super::matcher::Matcher;
 
-// 模式按照要求的顺序列出
-#[allow(dead_code)]
-static DEFAULT_PATTERNS: &[&str] = &[
-    "EP[", "sess:", "thrd:", "user:", "trxid:", "stmt:", "appname:",
+// 时间戳格式常量
+const TIMESTAMP_LENGTH: usize = 23;
+const MIN_LINE_LENGTH: usize = 25;
+const TIMESTAMP_SEPARATOR_POSITIONS: [(usize, u8); 6] = [
+    (4, b'-'),
+    (7, b'-'),
+    (10, b' '),
+    (13, b':'),
+    (16, b':'),
+    (19, b'.'),
 ];
+const TIMESTAMP_DIGIT_POSITIONS: [usize; 17] =
+    [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 20, 21, 22];
 
-// 懒惰初始化一个基于 DEFAULT_PATTERNS 的 Matcher，以便现有测试可以提前预热。
-#[allow(dead_code)]
-static DEFAULT_MATCHER: Lazy<Matcher> = Lazy::new(|| Matcher::from_patterns(DEFAULT_PATTERNS));
+// Meta 字段常量
+const META_START_INDEX: usize = 25;
+const REQUIRED_META_FIELDS: usize = 7;
+const META_WITH_IP_FIELDS: usize = 8;
 
-#[allow(dead_code)]
-#[inline(always)]
-pub fn is_ts_millis(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    if bytes.len() != 23 {
-        return false;
-    }
-    // 固定符号位置
-    if bytes[4] != b'-'
-        || bytes[7] != b'-'
-        || bytes[10] != b' '
-        || bytes[13] != b':'
-        || bytes[16] != b':'
-        || bytes[19] != b'.'
-    {
-        return false;
-    }
-    // 其余位置必须为数字
-    for &i in &[
-        0usize, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 20, 21, 22,
-    ] {
-        if !bytes[i].is_ascii_digit() {
-            return false;
-        }
-    }
-    true
-}
+// 使用 Lazy 静态初始化字段前缀数组，避免每次访问时创建
+static META_FIELD_PREFIXES: Lazy<[&'static str; 8]> = Lazy::new(|| {
+    [
+        "EP[",
+        "sess:",
+        "thrd:",
+        "user:",
+        "trxid:",
+        "stmt:",
+        "appname:",
+        "ip:::ffff:",
+    ]
+});
 
-/// `is_ts_millis` 的字节切片变体，以避免在扫描大缓冲区时创建临时 `&str` 切片。
+// 预定义的字节常量，避免重复创建
+const SPACE_BYTE: u8 = b' ';
+const OPEN_PAREN_BYTE: u8 = b'(';
+const CLOSE_PAREN_CHAR: char = ')';
+
 /// 期望输入恰好为 23 字节。
 #[inline(always)]
 pub fn is_ts_millis_bytes(bytes: &[u8]) -> bool {
-    if bytes.len() != 23 {
+    if bytes.len() != TIMESTAMP_LENGTH {
         return false;
     }
-    if bytes[4] != b'-'
-        || bytes[7] != b'-'
-        || bytes[10] != b' '
-        || bytes[13] != b':'
-        || bytes[16] != b':'
-        || bytes[19] != b'.'
-    {
-        return false;
+
+    // 检查分隔符位置
+    for &(pos, expected) in &TIMESTAMP_SEPARATOR_POSITIONS {
+        if bytes[pos] != expected {
+            return false;
+        }
     }
-    // 数字位置（硬编码索引）
-    for &i in &[
-        0usize, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 20, 21, 22,
-    ] {
+
+    // 检查数字位置
+    for &i in &TIMESTAMP_DIGIT_POSITIONS {
         if !bytes[i].is_ascii_digit() {
             return false;
         }
     }
+
     true
 }
 
-/// 判断一行是否为 sqllog 的“记录起始行”。
 ///
-/// 判定规则（严格匹配当前实现）：
-/// 1. 要求时间戳严格位于行首（不允许前导空白）；
-/// 2. 行首的前 23 个字符必须正好是时间戳，格式为 `YYYY-MM-DD HH:MM:SS.mmm`（由 `is_ts_millis` 验证）；
-/// 3. 在时间戳之后必须存在一对圆括号 `(...)`，括号内为元信息（元数据）；
-/// 4. 元信息中必须包含以下 7 个关键短语，且它们首次出现的顺序必须严格为：
-///    EP[ -> sess: -> thrd: -> user: -> trxid: -> stmt: -> appname:
+/// 判断一行日志是否为记录起始行。
 ///
-/// 输入/输出：
-/// - 输入：单行文本 `line: &str`（可以包含前导空白）；
-/// - 输出：bool，若满足上述所有条件则返回 true，否则返回 false。
-///
-/// 复杂度与性能：
-/// - 使用双数组 Aho-Corasick（daachorse）自动机一次扫描元信息（O(n + total_matches)），比多次子串查找更高效；
-/// - 该函数在最坏情况下仍然是线性相对输入长度的；
-/// - 适合在对大量日志行做快速分组时使用。
-///
-/// 边界情况与注意事项：
-/// - 关键字必须出现在括号内部；若关键字在括号外出现则视为不匹配；
-/// - 关键字匹配是基于文本子串（大小写敏感）；如果需要忽略大小写或支持更多变体，应在自动机构建时调整或归一化输入；
-/// - 只检查关键字的首次出现位置，以验证顺序；若关键字重复，只看第一次出现的位置；
-/// - 时间戳严格按字符位置校验，不尝试解析为日期/时间类型以节省分配与解析开销。
-#[allow(dead_code)]
-pub fn is_record_start(line: &str) -> bool {
-    // 1) 要求时间戳严格从行首开始（不允许前导空白）
-    //    因为日志格式保证时间戳占据前 23 个字符的位置
-    if line.len() < 23 {
+/// 判断标准
+/// 1. 行首 23 字节符合时间戳格式 `YYYY-MM-DD HH:mm:ss.SSS` -> ts
+/// 2. ts 后面紧跟一个空格，然后就是 meta 部分。
+/// 3. meta 是小括号包含起来的。
+/// 4. meta 部分必须包含所有字段（client_ip 可能没有）。
+/// 5. meta 字段间以一个空格分隔。
+/// 6. meta 字段间顺序是固定的。 顺序为 ep -> sess -> thrd_id -> username -> trxid -> statement -> appname -> client_ip (可选)。
+/// 7. meta 部分结束后紧跟一个空格，然后是 body 部分。
+pub fn is_record_start_line(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    if bytes.len() < MIN_LINE_LENGTH {
         return false;
     }
 
-    // 2) 校验时间戳格式（前 23 字符）
-    if !is_ts_millis(&line[0..23]) {
+    // 检查时间戳部分
+    if !is_ts_millis_bytes(&bytes[0..TIMESTAMP_LENGTH]) {
         return false;
     }
 
-    // 3) 在时间戳之后查找第一对圆括号，括号内为元信息
-    // 格式固定：时间戳后紧跟一个空格，然后立刻是 '('，其后为元信息直到匹配的 ')'
-    let rest = &line[23..];
-    // 检查至少有两个字符（空格 + '('）
-    let rest_bytes = rest.as_bytes();
-    if rest_bytes.len() < 2 || rest_bytes[0] != b' ' || rest_bytes[1] != b'(' {
+    // 检查时间戳后面的空格和括号
+    if bytes[23] != SPACE_BYTE || bytes[24] != OPEN_PAREN_BYTE {
         return false;
     }
-    // open 相对于 rest 的索引
-    let open = 1usize; // 紧接在空格之后
-    let close = match rest[open..].find(')') {
-        Some(p) => open + p,
-        // 没有匹配的 ')' 则不是起始行
+
+    // 查找并检查 meta 部分的右括号
+    let closing_paren_index = match line.find(CLOSE_PAREN_CHAR) {
+        Some(index) => index,
         None => return false,
     };
-    // 元信息字符串（不包含括号）
-    let meta = &rest[open + 1..close];
 
-    // 4) 使用 Matcher 在 meta 中一次扫描所有模式，记录每个模式的首次出现位置
-    //    patterns 的定义顺序就是我们要求的出现顺序（见静态 DEFAULT_PATTERNS 定义）
-    let matcher = &*DEFAULT_MATCHER;
-    let fp = matcher.find_first_positions(meta.as_bytes());
-    let mut first_pos: [Option<usize>; 7] = [None, None, None, None, None, None, None];
-    for (i, p) in fp.into_iter().enumerate().take(first_pos.len()) {
-        first_pos[i] = p;
-    }
+    // 解析并验证 meta 字段 - 使用单次迭代验证所有字段
+    let meta_part = &line[META_START_INDEX..closing_paren_index];
 
-    // 要求全部 7 个模式均出现
-    if first_pos.iter().any(|p| p.is_none()) {
-        return false;
-    }
+    // 创建迭代器并验证字段数量和内容
+    let mut split_iter = meta_part.split(' ');
+    let mut field_count = 0;
 
-    // 验证首次出现位置严格递增，保证顺序为 EP -> sess -> thrd -> user -> trxid -> stmt -> appname
-    let mut prev: Option<usize> = None;
-    for p in &first_pos {
-        let cur = p.unwrap();
-        if let Some(prev_pos) = prev {
-            // 若当前位置小于等于前一个位置，说明顺序错误或重叠
-            if cur <= prev_pos {
-                return false;
+    // 验证前 7 个必需字段
+    for prefix in META_FIELD_PREFIXES.iter().take(REQUIRED_META_FIELDS) {
+        match split_iter.next() {
+            Some(field) if field.contains(prefix) => {
+                field_count += 1;
             }
+            _ => return false,
         }
-        prev = Some(cur);
     }
 
-    true
-}
+    // 检查可选的 IP 字段
+    if let Some(ip_field) = split_iter.next() {
+        if !ip_field.contains(META_FIELD_PREFIXES[REQUIRED_META_FIELDS]) {
+            return false;
+        }
+        field_count += 1;
 
-/// 预热内部自动机和相关静态结构，以便第一次计时调用不包含延迟初始化分配。
-#[allow(dead_code)]
-pub fn prewarm() {
-    // 强制初始化静态自动机
-    let _ = &*DEFAULT_MATCHER;
+        // 不应该有更多字段
+        if split_iter.next().is_some() {
+            return false;
+        }
+    }
+
+    // 字段数量必须是 7 或 8
+    field_count == REQUIRED_META_FIELDS || field_count == META_WITH_IP_FIELDS
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_is_ts_millis() {
-        let valid_ts = "2023-10-05 14:23:45.123";
-        let invalid_ts_1 = "2023/10/05 14:23:45.123"; // 错误的分隔符
-        let invalid_ts_2 = "2023-10-05 14:23:45"; // 缺少毫秒部分
-        let invalid_ts_3 = "2023-10-05T14:23:45.123"; // 日期和时间之间分隔符错误
-        let invalid_ts_4 = "2023-10-05 14:23:4a.123"; // 包含非数字字符
+    mod timestamp_tests {
+        use super::*;
 
-        assert!(is_ts_millis(valid_ts));
-        assert!(!is_ts_millis(invalid_ts_1));
-        assert!(!is_ts_millis(invalid_ts_2));
-        assert!(!is_ts_millis(invalid_ts_3));
-        assert!(!is_ts_millis(invalid_ts_4));
+        #[test]
+        fn valid_timestamps() {
+            let valid_cases: &[&[u8]] = &[
+                b"2024-06-15 12:34:56.789",
+                b"2000-01-01 00:00:00.000",
+                b"2099-12-31 23:59:59.999",
+                b"2024-02-29 12:34:56.789", // 闰年
+            ];
+            for ts in valid_cases {
+                assert!(is_ts_millis_bytes(ts), "Failed for: {:?}", ts);
+            }
+        }
+
+        #[test]
+        fn wrong_length() {
+            let invalid_cases: &[&[u8]] = &[
+                b"2024-06-15 12:34:56",
+                b"2024-06-15 12:34:56.7",
+                b"2024-06-15 12:34:56.7890",
+                b"",
+                b"2024",
+            ];
+            for ts in invalid_cases {
+                assert!(!is_ts_millis_bytes(ts), "Should fail for: {:?}", ts);
+            }
+        }
+
+        #[test]
+        fn wrong_separator() {
+            let invalid_cases: &[&[u8]] = &[
+                b"2024-06-15 12:34:56,789", // 逗号代替点
+                b"2024/06/15 12:34:56.789", // 斜杠代替短横线
+                b"2024-06-15T12:34:56.789", // T 代替空格
+                b"2024-06-15-12:34:56.789", // 短横线代替空格
+                b"2024-06-15 12-34-56.789", // 短横线代替冒号
+            ];
+            for ts in invalid_cases {
+                assert!(!is_ts_millis_bytes(ts), "Should fail for: {:?}", ts);
+            }
+        }
+
+        #[test]
+        fn non_digits() {
+            let invalid_cases: &[&[u8]] = &[
+                b"202a-06-15 12:34:56.789",
+                b"2024-0b-15 12:34:56.789",
+                b"2024-06-1c 12:34:56.789",
+                b"2024-06-15 1d:34:56.789",
+                b"2024-06-15 12:3e:56.789",
+                b"2024-06-15 12:34:5f.789",
+                b"2024-06-15 12:34:56.78g",
+            ];
+            for ts in invalid_cases {
+                assert!(!is_ts_millis_bytes(ts), "Should fail for: {:?}", ts);
+            }
+        }
+
+        #[test]
+        fn special_chars() {
+            assert!(!is_ts_millis_bytes(b"2024-06-15 12:34:56.\x00\x00\x00"));
+            assert!(!is_ts_millis_bytes(b"\x002024-06-15 12:34:56.789"));
+        }
     }
 
-    #[test]
-    fn test_is_record_start_basic() {
-        let line = "2025-08-12 10:57:09.561 (EP[0] sess:abc thrd:1 user:joe trxid:123 stmt:0x1 appname:my)";
-        assert!(is_record_start(line));
-    }
+    mod record_start_line_tests {
+        use super::*;
 
-    #[test]
-    fn test_is_record_start_different_order() {
-        // 相同关键字但顺序错误现在不应被接受
-        let line = "2025-08-12 10:57:09.561 (user:joe appname:my trxid:123 thrd:1 sess:abc stmt:0x1 EP[0])";
-        assert!(!is_record_start(line));
-    }
+        #[test]
+        fn valid_complete_line() {
+            let line = "2025-08-12 10:57:09.548 (EP[0] sess:0x178ebca0 thrd:757455 user:HBTCOMS_V3_PROD trxid:0 stmt:0x285eb060 appname: ip:::ffff:10.3.100.68) [SEL] select 1 from dual EXECTIME: 0(ms) ROWCOUNT: 1(rows) EXEC_ID: 289655178.";
+            assert!(is_record_start_line(line));
+        }
 
-    #[test]
-    fn test_is_record_start_correct_order_complex() {
-        // 关键字可能穿插出现，但仍需保持所需顺序 EP -> sess -> thrd -> user -> trxid -> stmt -> appname
-        let line = "2025-08-12 10:57:09.561 (EP[0] foobar sess:abc baz thrd:1 qux user:joe trxid:123 stmt:0x1 zz appname:my)";
-        assert!(is_record_start(line));
-    }
+        #[test]
+        fn valid_without_ip() {
+            let line = "2025-08-12 10:57:09.548 (EP[0] sess:0x178ebca0 thrd:757455 user:HBTCOMS_V3_PROD trxid:0 stmt:0x285eb060 appname:) [SEL] select 1 from dual";
+            assert!(is_record_start_line(line));
+        }
 
-    #[test]
-    fn test_is_record_start_leading_whitespace() {
-        // 有前导空格的行现在不被接受（时间戳必须在行首）
-        let line = "   2025-08-12 10:57:09.561 (EP[0] sess:abc thrd:1 user:joe trxid:123 stmt:0x1 appname:my)";
-        assert!(!is_record_start(line));
-    }
+        #[test]
+        fn minimal_valid() {
+            let line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body";
+            assert!(is_record_start_line(line));
+        }
 
-    #[test]
-    fn test_is_record_start_missing_keyword() {
-        let line = "2025-08-12 10:57:09.561 (EP[0] sess:abc thrd:1 trxid:123 stmt:0x1 appname:my)"; // 缺少 user
-        assert!(!is_record_start(line));
-    }
+        #[test]
+        fn too_short() {
+            let short_lines = [
+                "2025-08-12 10:57:09.548",
+                "2025-08-12 10:57:09.548 (",
+                "",
+                "short",
+            ];
+            for line in &short_lines {
+                assert!(!is_record_start_line(line), "Should fail for: {}", line);
+            }
+        }
 
-    #[test]
-    fn test_is_record_start_keyword_outside_parentheses() {
-        let line =
-            "2025-08-12 10:57:09.561 EP[0] sess:abc thrd:1 user:joe trxid:123 stmt:0x1 appname:my";
-        // 因为我们要求元数据位于括号内，因此应返回 false
-        assert!(!is_record_start(line));
-    }
+        #[test]
+        fn invalid_timestamp() {
+            let line = "2025-08-12 10:57:09,548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body";
+            assert!(!is_record_start_line(line));
+        }
 
-    #[test]
-    fn test_is_record_start_no_parentheses() {
-        let line = "2025-08-12 10:57:09.561 some random text";
-        assert!(!is_record_start(line));
-    }
+        #[test]
+        fn format_errors() {
+            let invalid_lines = [
+                "2025-08-12 10:57:09.548(EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body", // 无空格
+                "2025-08-12 10:57:09.548 EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body", // 无左括号
+                "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app body", // 无右括号
+            ];
+            for line in &invalid_lines {
+                assert!(!is_record_start_line(line), "Should fail for: {}", line);
+            }
+        }
 
-    #[test]
-    fn test_is_record_start_invalid_timestamp() {
-        let line =
-            "2025-08-12T10:57:09 (EP[0] sess:abc thrd:1 user:joe trxid:123 stmt:0x1 appname:my)";
-        assert!(!is_record_start(line));
+        #[test]
+        fn insufficient_fields() {
+            let line =
+                "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789) body";
+            assert!(!is_record_start_line(line));
+        }
+
+        #[test]
+        fn wrong_field_order() {
+            let line = "2025-08-12 10:57:09.548 (sess:123 EP[0] thrd:456 user:alice trxid:789 stmt:999 appname:app) body";
+            assert!(!is_record_start_line(line));
+        }
+
+        #[test]
+        fn missing_required_fields() {
+            let test_cases = [
+                (
+                    "2025-08-12 10:57:09.548 (sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body",
+                    "EP",
+                ),
+                (
+                    "2025-08-12 10:57:09.548 (EP[0] thrd:456 user:alice trxid:789 stmt:999 appname:app) body",
+                    "sess",
+                ),
+                (
+                    "2025-08-12 10:57:09.548 (EP[0] sess:123 user:alice trxid:789 stmt:999 appname:app) body",
+                    "thrd",
+                ),
+                (
+                    "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 trxid:789 stmt:999 appname:app) body",
+                    "user",
+                ),
+                (
+                    "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice stmt:999 appname:app) body",
+                    "trxid",
+                ),
+                (
+                    "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 appname:app) body",
+                    "stmt",
+                ),
+                (
+                    "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999) body",
+                    "appname",
+                ),
+            ];
+            for (line, field) in &test_cases {
+                assert!(
+                    !is_record_start_line(line),
+                    "Should fail when missing {} field",
+                    field
+                );
+            }
+        }
+
+        #[test]
+        fn with_valid_ip() {
+            let line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app ip:::ffff:192.168.1.100) body";
+            assert!(is_record_start_line(line));
+        }
+
+        #[test]
+        fn with_invalid_ip_format() {
+            let line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app ip:192.168.1.100) body";
+            assert!(!is_record_start_line(line));
+        }
+
+        #[test]
+        fn complex_field_values() {
+            let line = "2025-08-12 10:57:09.548 (EP[123] sess:0xABCD1234 thrd:9999999 user:USER_WITH_UNDERSCORES trxid:12345678 stmt:0xFFFFFFFF appname:app-name-with-dashes ip:::ffff:10.20.30.40) SELECT * FROM table";
+            assert!(is_record_start_line(line));
+        }
+
+        #[test]
+        fn empty_appname() {
+            let line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:) body";
+            assert!(is_record_start_line(line));
+        }
+
+        #[test]
+        fn continuation_line() {
+            let continuation = "    SELECT * FROM users WHERE id = 1";
+            assert!(!is_record_start_line(continuation));
+        }
+
+        #[test]
+        fn double_space_in_meta() {
+            let line = "2025-08-12 10:57:09.548 (EP[0]  sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body";
+            assert!(!is_record_start_line(line));
+        }
     }
 }

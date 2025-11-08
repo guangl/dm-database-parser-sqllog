@@ -17,9 +17,8 @@ name = "dm_database_parser_sqllog"
 path = "src/lib.rs"
 
 [dependencies]
-daachorse = "1.0.0"
-once_cell = "1.20"
-thiserror = "1.0"
+once_cell = "1.21.3"
+thiserror = "2.0.17"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -27,24 +26,9 @@ tempfile = "3.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 
 [[bench]]
+name = "tools_bench"
+harness = false
+
+[[bench]]
 name = "parser_bench"
 harness = false
-
-[[bench]]
-name = "performance_test"
-harness = false
-
-[[bench]]
-name = "realtime_bench"
-harness = false
-
-[[bench]]
-name = "sqlite_bench"
-harness = false
-
-[[example]]
-name = "sqlite_write"
-required-features = []
-
-[features]
-default = []

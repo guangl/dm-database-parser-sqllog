@@ -39,7 +39,7 @@ println!("找到 {} 条记录，{} 条前导错误", records.len(), errors.len()
 // 解析记录
 for record in records {
     let parsed = parse_record(record);
-    println!("用户: {}, 事务ID: {}, 执行时间: {:?}ms", 
+    println!("用户: {}, 事务ID: {}, 执行时间: {:?}ms",
              parsed.user, parsed.trxid, parsed.execute_time_ms);
 }
 ```
@@ -155,12 +155,33 @@ cargo build
 # 运行测试
 cargo test
 
+# 运行性能测试
+cargo bench
+
+# 查看性能报告
+# 详细的性能测试报告：docs/PERFORMANCE_BENCHMARK.md
+# HTML 报告：target/criterion/report/index.html
+
 # 运行示例
 cargo run --example basic
 
 # 生成文档
 cargo doc --open
 ```
+
+## 性能
+
+- **RecordParser**: 467 MiB/s 吞吐量，每秒处理约 310 万条记录
+- **SqllogParser**: 130 MiB/s 吞吐量，每秒处理约 91 万条记录
+- **时间戳验证**: 纳秒级（~2.7 ns）
+- **记录行识别**: 百纳秒级（~160-190 ns）
+- **单条记录解析**: 微秒级（~656 ns - 1.1 µs）
+
+对于典型的 1 GB 日志文件（约 400 万条记录）：
+- RecordParser: ~1.3 秒
+- SqllogParser: ~4.4 秒
+
+详细性能测试报告请查看：**[docs/PERFORMANCE_BENCHMARK.md](docs/PERFORMANCE_BENCHMARK.md)**
 
 ## 许可证
 
@@ -172,3 +193,4 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 - [Crates.io](https://crates.io/crates/dm-database-parser-sqllog)
 - [文档](https://docs.rs/dm-database-parser-sqllog)
 - [GitHub](https://github.com/guangl/dm-parser-sqllog)
+- [性能测试报告](docs/PERFORMANCE_BENCHMARK.md)
