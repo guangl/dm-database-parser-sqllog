@@ -196,7 +196,10 @@ where
     use std::fs::File;
     use std::io::BufReader;
 
-    let file = File::open(path).map_err(|e| ParseError::FileNotFound(e.to_string()))?;
+    let path_ref = path.as_ref();
+    let file = File::open(path_ref).map_err(|e| ParseError::FileNotFound {
+        path: format!("{}: {}", path_ref.display(), e),
+    })?;
     let reader = BufReader::new(file);
     for_each_sqllog(reader, callback)
 }
@@ -245,7 +248,10 @@ pub fn iter_records_from_file<P>(path: P) -> Result<RecordParser<BufReader<File>
 where
     P: AsRef<Path>,
 {
-    let file = File::open(path).map_err(|e| ParseError::FileNotFound(e.to_string()))?;
+    let path_ref = path.as_ref();
+    let file = File::open(path_ref).map_err(|e| ParseError::FileNotFound {
+        path: format!("{}: {}", path_ref.display(), e),
+    })?;
     let reader = BufReader::new(file);
     Ok(RecordParser::new(reader))
 }
@@ -294,7 +300,10 @@ pub fn iter_sqllogs_from_file<P>(path: P) -> Result<SqllogParser<BufReader<File>
 where
     P: AsRef<Path>,
 {
-    let file = File::open(path).map_err(|e| ParseError::FileNotFound(e.to_string()))?;
+    let path_ref = path.as_ref();
+    let file = File::open(path_ref).map_err(|e| ParseError::FileNotFound {
+        path: format!("{}: {}", path_ref.display(), e),
+    })?;
     let reader = BufReader::new(file);
     Ok(SqllogParser::new(reader))
 }

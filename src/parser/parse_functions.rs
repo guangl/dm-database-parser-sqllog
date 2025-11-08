@@ -50,12 +50,17 @@ pub fn parse_record(lines: &[&str]) -> Result<Sqllog, ParseError> {
 
     // 验证第一行格式
     if !is_record_start_line(first_line) {
-        return Err(ParseError::InvalidRecordStartLine);
+        return Err(ParseError::InvalidRecordStartLine {
+            raw: first_line.to_string(),
+        });
     }
 
     // 验证行长度
     if first_line.len() < MIN_RECORD_LENGTH {
-        return Err(ParseError::LineTooShort(first_line.len()));
+        return Err(ParseError::LineTooShort {
+            length: first_line.len(),
+            raw: first_line.to_string(),
+        });
     }
 
     // 解析时间戳
@@ -64,10 +69,15 @@ pub fn parse_record(lines: &[&str]) -> Result<Sqllog, ParseError> {
     // 查找 meta 部分的右括号
     let closing_paren = first_line
         .find(')')
-        .ok_or(ParseError::MissingClosingParen)?;
+        .ok_or_else(|| ParseError::MissingClosingParen {
+            raw: first_line.to_string(),
+        })?;
 
     if closing_paren <= META_START_INDEX {
-        return Err(ParseError::InsufficientMetaFields(0));
+        return Err(ParseError::InsufficientMetaFields {
+            count: 0,
+            raw: first_line[META_START_INDEX..].to_string(),
+        });
     }
 
     // 解析 meta 部分
@@ -177,29 +187,138 @@ pub(crate) fn extract_sql_body(full_body: &str) -> String {
 
 /// 解析 meta 字符串
 pub(crate) fn parse_meta(meta_str: &str) -> Result<MetaParts, ParseError> {
-    let fields: Vec<&str> = meta_str.split(' ').collect();
+    // 使用前缀定位法而非简单分割，以正确处理 appname 中的空格
 
-    if fields.len() < 7 {
-        return Err(ParseError::InsufficientMetaFields(fields.len()));
+    // 解析 EP - 从头开始
+    let ep_end = meta_str
+        .find(' ')
+        .ok_or(ParseError::InsufficientMetaFields {
+            count: 0,
+            raw: meta_str.to_string(),
+        })?;
+    let ep = parse_ep_field(&meta_str[..ep_end], meta_str)?;
+
+    // 解析 sess
+    let sess_start = ep_end + 1;
+    let sess_end = meta_str[sess_start..]
+        .find(' ')
+        .ok_or(ParseError::InsufficientMetaFields {
+            count: 1,
+            raw: meta_str.to_string(),
+        })?
+        + sess_start;
+    let sess_id = extract_field_value(&meta_str[sess_start..sess_end], SESS_PREFIX, meta_str)?;
+
+    // 解析 thrd
+    let thrd_start = sess_end + 1;
+    let thrd_end = meta_str[thrd_start..]
+        .find(' ')
+        .ok_or(ParseError::InsufficientMetaFields {
+            count: 2,
+            raw: meta_str.to_string(),
+        })?
+        + thrd_start;
+    let thrd_id = extract_field_value(&meta_str[thrd_start..thrd_end], THRD_PREFIX, meta_str)?;
+
+    // 解析 user
+    let user_start = thrd_end + 1;
+    let user_end = meta_str[user_start..]
+        .find(' ')
+        .ok_or(ParseError::InsufficientMetaFields {
+            count: 3,
+            raw: meta_str.to_string(),
+        })?
+        + user_start;
+    let username = extract_field_value(&meta_str[user_start..user_end], USER_PREFIX, meta_str)?;
+
+    // 解析 trxid
+    let trxid_start = user_end + 1;
+    let trxid_end_result = meta_str[trxid_start..].find(' ');
+    let (trxid, after_trxid) = if let Some(trxid_end_offset) = trxid_end_result {
+        let trxid_end = trxid_start + trxid_end_offset;
+        (
+            extract_field_value(&meta_str[trxid_start..trxid_end], TRXID_PREFIX, meta_str)?,
+            trxid_end + 1,
+        )
+    } else {
+        // 没有更多字段，trxid 是最后一个字段（只有 5 个字段）
+        (
+            extract_field_value(&meta_str[trxid_start..], TRXID_PREFIX, meta_str)?,
+            meta_str.len(),
+        )
+    };
+
+    // 如果只有 5 个字段，返回默认值
+    if after_trxid >= meta_str.len() {
+        return Ok(MetaParts {
+            ep,
+            sess_id,
+            thrd_id,
+            username,
+            trxid,
+            statement: String::new(),
+            appname: String::new(),
+            client_ip: String::new(),
+        });
     }
 
-    // 解析 EP
-    let ep = parse_ep_field(fields[0])?;
+    // 解析 stmt（可能不存在）
+    let stmt_start = after_trxid;
+    let stmt_end_result = meta_str[stmt_start..].find(' ');
+    let (statement, after_stmt) = if let Some(stmt_end_offset) = stmt_end_result {
+        let stmt_end = stmt_start + stmt_end_offset;
+        (
+            extract_field_value(&meta_str[stmt_start..stmt_end], STMT_PREFIX, meta_str)?,
+            stmt_end + 1,
+        )
+    } else {
+        // 没有更多字段，stmt 是最后一个字段（只有 6 个字段）
+        (
+            extract_field_value(&meta_str[stmt_start..], STMT_PREFIX, meta_str)?,
+            meta_str.len(),
+        )
+    };
 
-    // 解析必需字段 - 使用静态常量避免字符串字面量重复
-    let sess_id = extract_field_value(fields[1], SESS_PREFIX)?;
-    let thrd_id = extract_field_value(fields[2], THRD_PREFIX)?;
-    let username = extract_field_value(fields[3], USER_PREFIX)?;
-    let trxid = extract_field_value(fields[4], TRXID_PREFIX)?;
-    let statement = extract_field_value(fields[5], STMT_PREFIX)?;
-    let appname = extract_field_value(fields[6], APPNAME_PREFIX)?;
+    // 如果只有 6 个字段，返回默认 appname 和 client_ip
+    if after_stmt >= meta_str.len() {
+        return Ok(MetaParts {
+            ep,
+            sess_id,
+            thrd_id,
+            username,
+            trxid,
+            statement,
+            appname: String::new(),
+            client_ip: String::new(),
+        });
+    }
 
-    // 可选的 client_ip
-    let client_ip = fields
-        .get(7)
-        .map(|field| extract_field_value(field, IP_PREFIX))
-        .transpose()?
-        .unwrap_or_default();
+    // 解析 appname（可选，且值可能包含空格）
+    let appname_start = after_stmt;
+    let (appname, client_ip) = if appname_start < meta_str.len() {
+        // 检查是否有 appname 字段
+        if meta_str[appname_start..].starts_with(APPNAME_PREFIX) {
+            // 找到 appname，需要确定其结束位置
+            // appname 后面可能跟着 " ip:::ffff:" 或者直接结束
+            let appname_value_start = appname_start + APPNAME_PREFIX.len();
+            if let Some(ip_pos) = meta_str[appname_value_start..].find(" ip:::ffff:") {
+                // 有 IP 字段
+                let appname_value = &meta_str[appname_value_start..appname_value_start + ip_pos];
+                let ip_start = appname_value_start + ip_pos + 1;
+                let client_ip = extract_field_value(&meta_str[ip_start..], IP_PREFIX, meta_str)?;
+                (appname_value.to_string(), client_ip)
+            } else {
+                // 没有 IP 字段，appname 到末尾
+                let appname_value = &meta_str[appname_value_start..];
+                (appname_value.to_string(), String::new())
+            }
+        } else {
+            // 没有 appname 字段
+            (String::new(), String::new())
+        }
+    } else {
+        (String::new(), String::new())
+    };
 
     Ok(MetaParts {
         ep,
@@ -215,26 +334,35 @@ pub(crate) fn parse_meta(meta_str: &str) -> Result<MetaParts, ParseError> {
 
 /// 解析 EP 字段
 #[inline]
-pub(crate) fn parse_ep_field(ep_str: &str) -> Result<u8, ParseError> {
+pub(crate) fn parse_ep_field(ep_str: &str, raw: &str) -> Result<u8, ParseError> {
     if !ep_str.starts_with("EP[") || !ep_str.ends_with(']') {
-        return Err(ParseError::InvalidEpFormat(ep_str.to_string()));
+        return Err(ParseError::InvalidEpFormat {
+            value: ep_str.to_string(),
+            raw: raw.to_string(),
+        });
     }
 
     let ep_num = &ep_str[3..ep_str.len() - 1];
-    ep_num
-        .parse::<u8>()
-        .map_err(|_| ParseError::EpParseError(ep_num.to_string()))
+    ep_num.parse::<u8>().map_err(|_| ParseError::EpParseError {
+        value: ep_num.to_string(),
+        raw: raw.to_string(),
+    })
 }
 
 /// 从字段中提取值
 #[inline]
-pub(crate) fn extract_field_value(field: &str, prefix: &str) -> Result<String, ParseError> {
+pub(crate) fn extract_field_value(
+    field: &str,
+    prefix: &str,
+    raw: &str,
+) -> Result<String, ParseError> {
     field
         .strip_prefix(prefix)
         .map(|s| s.to_string())
         .ok_or_else(|| ParseError::InvalidFieldFormat {
             expected: prefix.to_string(),
             actual: field.to_string(),
+            raw: raw.to_string(),
         })
 }
 
@@ -245,17 +373,27 @@ pub(crate) fn parse_indicators(body: &str) -> Result<IndicatorsParts, ParseError
     let row_count_str = extract_indicator(body, ROWCOUNT_PREFIX, ROWCOUNT_SUFFIX)?;
     let exec_id_str = extract_indicator(body, EXEC_ID_PREFIX, EXEC_ID_SUFFIX)?;
 
-    let execute_time = exec_time_str.parse::<f32>().map_err(|_| {
-        ParseError::IndicatorsParseError(format!("执行时间解析失败: {}", exec_time_str))
-    })?;
+    let execute_time =
+        exec_time_str
+            .parse::<f32>()
+            .map_err(|_| ParseError::IndicatorsParseError {
+                reason: format!("执行时间解析失败: {}", exec_time_str),
+                raw: body.to_string(),
+            })?;
 
-    let row_count = row_count_str.parse::<u32>().map_err(|_| {
-        ParseError::IndicatorsParseError(format!("行数解析失败: {}", row_count_str))
-    })?;
+    let row_count = row_count_str
+        .parse::<u32>()
+        .map_err(|_| ParseError::IndicatorsParseError {
+            reason: format!("行数解析失败: {}", row_count_str),
+            raw: body.to_string(),
+        })?;
 
-    let execute_id = exec_id_str.parse::<i64>().map_err(|_| {
-        ParseError::IndicatorsParseError(format!("执行 ID 解析失败: {}", exec_id_str))
-    })?;
+    let execute_id = exec_id_str
+        .parse::<i64>()
+        .map_err(|_| ParseError::IndicatorsParseError {
+            reason: format!("执行 ID 解析失败: {}", exec_id_str),
+            raw: body.to_string(),
+        })?;
 
     Ok(IndicatorsParts {
         execute_time,
@@ -273,13 +411,19 @@ pub(crate) fn extract_indicator<'a>(
 ) -> Result<&'a str, ParseError> {
     let start_pos = text
         .find(prefix)
-        .ok_or_else(|| ParseError::IndicatorsParseError(format!("未找到 {}", prefix)))?
+        .ok_or_else(|| ParseError::IndicatorsParseError {
+            reason: format!("未找到 {}", prefix),
+            raw: text.to_string(),
+        })?
         + prefix.len();
 
     let remaining = &text[start_pos..];
     let end_offset = remaining
         .find(suffix)
-        .ok_or_else(|| ParseError::IndicatorsParseError(format!("未找到 {}", suffix)))?;
+        .ok_or_else(|| ParseError::IndicatorsParseError {
+            reason: format!("未找到 {}", suffix),
+            raw: text.to_string(),
+        })?;
 
     Ok(remaining[..end_offset].trim())
 }

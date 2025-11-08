@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **错误信息增强**：所有 `ParseError` 变体现在都包含原始数据用于调试
+  - 从元组变体改为结构体变体（如 `InvalidEpFormat { value, raw }`）
+  - 所有错误消息格式统一为：`错误描述 | raw: 原始数据`
+  - `FileNotFound` 错误现在包含完整的文件路径和系统错误信息
+- **is_record_start_line 优化**：修复字段数量验证逻辑，确保至少 5 个必需字段
+- **测试改进**：更新测试用例以适配新的错误格式和字段验证规则
+
+### Fixed
+- 修复了 `is_record_start_line` 在字段不足时仍可能返回 true 的问题
+- 修复了所有测试用例以匹配新的结构体变体错误格式
+
 ## [0.1.3] - 2025-11-09
 
 ### Added

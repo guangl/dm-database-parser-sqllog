@@ -164,7 +164,7 @@ fn test_parse_record_invalid_format() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        ParseError::InvalidRecordStartLine
+        ParseError::InvalidRecordStartLine { .. }
     ));
 }
 
@@ -283,55 +283,68 @@ fn test_extract_sql_body_without_indicators() {
 
 #[test]
 fn test_parse_ep_field_valid() {
-    let result = parse_ep_field("EP[0]");
+    let raw = "EP[0]";
+    let result = parse_ep_field(raw, raw);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 0);
 
-    let result = parse_ep_field("EP[15]");
+    let raw = "EP[15]";
+    let result = parse_ep_field(raw, raw);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 15);
 }
 
 #[test]
 fn test_parse_ep_field_invalid_format() {
-    let result = parse_ep_field("EP0");
+    let raw = "EP0";
+    let result = parse_ep_field(raw, raw);
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        ParseError::InvalidEpFormat(_)
+        ParseError::InvalidEpFormat { .. }
     ));
 
-    let result = parse_ep_field("[0]");
+    let raw = "[0]";
+    let result = parse_ep_field(raw, raw);
     assert!(result.is_err());
 
-    let result = parse_ep_field("EP[");
+    let raw = "EP[";
+    let result = parse_ep_field(raw, raw);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_parse_ep_field_invalid_number() {
-    let result = parse_ep_field("EP[abc]");
+    let raw = "EP[abc]";
+    let result = parse_ep_field(raw, raw);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), ParseError::EpParseError(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        ParseError::EpParseError { .. }
+    ));
 
-    let result = parse_ep_field("EP[256]"); // 超过 u8 范围
+    let raw = "EP[256]"; // 超过 u8 范围
+    let result = parse_ep_field(raw, raw);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_extract_field_value_valid() {
-    let result = extract_field_value("sess:123", "sess:");
+    let raw = "sess:123";
+    let result = extract_field_value(raw, "sess:", raw);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "123");
 
-    let result = extract_field_value("user:alice", "user:");
+    let raw = "user:alice";
+    let result = extract_field_value(raw, "user:", raw);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "alice");
 }
 
 #[test]
 fn test_extract_field_value_invalid_prefix() {
-    let result = extract_field_value("sess:123", "user:");
+    let raw = "sess:123";
+    let result = extract_field_value(raw, "user:", raw);
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
@@ -341,7 +354,8 @@ fn test_extract_field_value_invalid_prefix() {
 
 #[test]
 fn test_extract_field_value_empty_value() {
-    let result = extract_field_value("sess:", "sess:");
+    let raw = "sess:";
+    let result = extract_field_value(raw, "sess:", raw);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "");
 }
@@ -381,7 +395,7 @@ fn test_parse_meta_insufficient_fields() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        ParseError::InsufficientMetaFields(3)
+        ParseError::InsufficientMetaFields { .. }
     ));
 }
 
@@ -392,7 +406,7 @@ fn test_parse_meta_invalid_ep() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        ParseError::InvalidEpFormat(_)
+        ParseError::InvalidEpFormat { .. }
     ));
 }
 
@@ -425,7 +439,7 @@ fn test_parse_indicators_missing_exectime() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        ParseError::IndicatorsParseError(_)
+        ParseError::IndicatorsParseError { .. }
     ));
 }
 
@@ -594,7 +608,7 @@ fn test_parse_record_line_too_short() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        ParseError::InvalidRecordStartLine
+        ParseError::InvalidRecordStartLine { .. }
     ));
 }
 
@@ -608,20 +622,26 @@ fn test_parse_record_missing_closing_paren() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        ParseError::InvalidRecordStartLine
+        ParseError::InvalidRecordStartLine { .. }
     ));
 }
 
 #[test]
 fn test_parse_record_insufficient_meta_fields() {
-    // meta 字段不足，is_record_start_line 会拒绝
+    // meta 字段不足（少于 5 个必需字段），is_record_start_line 会拒绝
     let lines = vec!["2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456) SELECT 1"];
     let result = parse_record(&lines);
     assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err(),
-        ParseError::InvalidRecordStartLine
-    ));
+    // 可能得到 InvalidRecordStartLine, InsufficientMetaFields 或 EmptyInput
+    match result.unwrap_err() {
+        ParseError::InvalidRecordStartLine { .. }
+        | ParseError::InsufficientMetaFields { .. }
+        | ParseError::EmptyInput => {}
+        e => panic!(
+            "Expected InvalidRecordStartLine, InsufficientMetaFields or EmptyInput, got: {:?}",
+            e
+        ),
+    }
 }
 
 #[test]

@@ -58,7 +58,9 @@ impl<R: Read> Iterator for SqllogParser<R> {
     fn next(&mut self) -> Option<Self::Item> {
         match self.record_parser.next()? {
             Ok(record) => Some(record.parse_to_sqllog()),
-            Err(e) => Some(Err(ParseError::FileNotFound(e.to_string()))),
+            Err(e) => Some(Err(ParseError::FileNotFound {
+                path: e.to_string(),
+            })),
         }
     }
 }

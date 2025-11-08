@@ -68,7 +68,7 @@ fn test_for_each_sqllog_from_file_not_found() {
     let result = for_each_sqllog_from_file("nonexistent_file.log", |_| {});
     assert!(result.is_err());
     if let Err(e) = result {
-        assert!(matches!(e, ParseError::FileNotFound(_)));
+        assert!(matches!(e, ParseError::FileNotFound { .. }));
     }
 }
 
@@ -116,7 +116,7 @@ fn test_parse_records_from_file_not_found() {
     let result = parse_records_from_file("nonexistent.log");
     assert!(result.is_err());
     if let Err(e) = result {
-        assert!(matches!(e, ParseError::FileNotFound(_)));
+        assert!(matches!(e, ParseError::FileNotFound { .. }));
     }
 }
 
@@ -181,7 +181,7 @@ fn test_iter_records_from_file_not_found() {
     let result = iter_records_from_file("nonexistent.log");
     assert!(result.is_err());
     if let Err(e) = result {
-        assert!(matches!(e, ParseError::FileNotFound(_)));
+        assert!(matches!(e, ParseError::FileNotFound { .. }));
     }
 }
 
@@ -191,7 +191,7 @@ fn test_iter_sqllogs_from_file_not_found() {
     let result = iter_sqllogs_from_file("nonexistent.log");
     assert!(result.is_err());
     if let Err(e) = result {
-        assert!(matches!(e, ParseError::FileNotFound(_)));
+        assert!(matches!(e, ParseError::FileNotFound { .. }));
     }
 }
 

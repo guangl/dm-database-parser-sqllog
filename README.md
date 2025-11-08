@@ -13,6 +13,7 @@
 - **高效模式匹配**：使用双数组 Aho-Corasick（daachorse）进行高效模式匹配
 - **轻量级结构**：解析结果使用引用（`&str`），避免不必要的字符串复制
 - **灵活的 API**：提供批量解析、流式解析等多种使用方式
+- **详细的错误信息**：所有解析错误都包含原始数据，便于调试和问题定位
 - **高性能**：适合在高吞吐日志处理场景中使用
 
 ## 安装
@@ -156,6 +157,51 @@ for error in parse_errors {
     eprintln!("解析错误: {}", error);
 }
 ```
+
+### 错误处理和调试
+
+所有解析错误都包含详细的原始数据，便于调试和定位问题：
+
+```rust
+use dm_database_parser_sqllog::{iter_sqllogs_from_file, ParseError};
+
+for result in iter_sqllogs_from_file("log.sqllog")? {
+    match result {
+        Ok(sqllog) => {
+            // 处理成功的记录
+        }
+        Err(e) => {
+            // 错误信息包含原始数据
+            match e {
+                ParseError::InvalidRecordStartLine { raw } => {
+                    eprintln!("无效的记录起始行: {}", raw);
+                }
+                ParseError::LineTooShort { length, raw } => {
+                    eprintln!("行太短 (长度: {}): {}", length, raw);
+                }
+                ParseError::InsufficientMetaFields { count, raw } => {
+                    eprintln!("字段不足 (只有 {} 个): {}", count, raw);
+                }
+                ParseError::InvalidEpFormat { value, raw } => {
+                    eprintln!("EP 格式错误 '{}' 在: {}", value, raw);
+                }
+                ParseError::FileNotFound { path } => {
+                    eprintln!("文件未找到: {}", path);
+                }
+                _ => eprintln!("其他错误: {}", e),
+            }
+        }
+    }
+}
+```
+
+所有错误类型的 `Display` 实现都遵循格式：`错误描述 | raw: 原始数据`，例如：
+```
+invalid EP format: EPX0] | raw: EPX0] sess:123 thrd:456 user:alice trxid:0 stmt:999 appname:app
+```
+
+这使得在生产环境中快速定位问题变得更加容易。
+
 
 **API 对比**：
 
