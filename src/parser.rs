@@ -3,23 +3,9 @@
 /// 该结构体包含从日志文本中解析出的所有字段。所有字符串字段都是对原始输入文本的引用，
 /// 因此不会产生额外的内存分配。
 ///
-/// # 记录结构（四部分）
-///
-/// 每条记录由四个部分组成：
-/// 1. **ts** - 时间戳（必定在首行）
-/// 2. **meta** - 元信息（必定在首行，跟在时间戳后）
-/// 3. **body** - SQL 主体（可能跨多行）
-/// 4. **end** - 执行信息（可选，如果存在必定在最后一行）
-///
 /// # 字段说明
 ///
-/// ## 核心四部分
-/// - `ts`: 时间戳字符串（格式：`YYYY-MM-DD HH:MM:SS.mmm`），必定在首行
-/// - `meta`: 完整的元信息部分（从时间戳后到 SQL 主体前的内容），必定在首行
-/// - `body`: SQL 主体内容（可能跨多行）
-/// - `end`: 执行信息行（可选，格式：`EXECTIME: Xms ROWCOUNT: Y EXEC_ID: Z`），如果存在必定在最后一行
-///
-/// ## 解析字段
+/// - `ts`: 时间戳字符串（格式：`YYYY-MM-DD HH:MM:SS.mmm`）
 /// - `meta_raw`: 原始元信息字符串（括号内的内容）
 /// - `ep`: 执行计划标识符
 /// - `sess`: 会话标识符
@@ -29,6 +15,7 @@
 /// - `stmt`: 语句标识符
 /// - `appname`: 应用程序名称
 /// - `ip`: 客户端IP地址（可选）
+/// - `body`: 记录主体内容（SQL语句等）
 /// - `execute_time_ms`: 执行时间（毫秒，可选）
 /// - `row_count`: 影响的行数（可选）
 /// - `execute_id`: 执行ID（可选）
@@ -38,56 +25,25 @@
 /// ```rust
 /// use dm_database_parser_sqllog::parse_record;
 ///
-/// let log_text = "2025-08-12 10:57:09.562 (EP[0] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) SELECT 1\nEXECTIME: 10ms ROWCOUNT: 1 EXEC_ID: 100";
+/// let log_text = "2025-08-12 10:57:09.562 (EP[0] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) SELECT 1";
 /// let parsed = parse_record(log_text);
-/// 
-/// // 四部分结构
-/// println!("时间戳: {}", parsed.ts);
-/// println!("元信息: {}", parsed.meta);
-/// println!("SQL主体: {}", parsed.body);
-/// if let Some(end) = parsed.end {
-///     println!("执行信息: {}", end);
-/// }
-/// 
-/// // 解析字段
 /// println!("用户: {}, 事务ID: {}", parsed.user, parsed.trxid);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedRecord<'a> {
-    // === 核心四部分 ===
-    /// 时间戳部分（必定在首行）
     pub ts: &'a str,
-    /// 完整元信息部分（必定在首行，包含括号及内容）
-    pub meta: &'a str,
-    /// SQL 主体（可能跨多行）
-    pub body: &'a str,
-    /// 执行信息行（可选，如果存在必定在最后一行）
-    pub end: Option<&'a str>,
-    
-    // === 解析后的字段 ===
-    /// 原始元信息字符串（括号内的内容）
     pub meta_raw: &'a str,
-    /// 执行计划标识符
     pub ep: &'a str,
-    /// 会话标识符
     pub sess: &'a str,
-    /// 线程标识符
     pub thrd: &'a str,
-    /// 用户名
     pub user: &'a str,
-    /// 事务ID
     pub trxid: &'a str,
-    /// 语句标识符
     pub stmt: &'a str,
-    /// 应用程序名称
     pub appname: &'a str,
-    /// 客户端IP地址（可选）
     pub ip: Option<&'a str>,
-    /// 执行时间（毫秒，可选）
+    pub body: &'a str,
     pub execute_time_ms: Option<u64>,
-    /// 影响的行数（可选）
     pub row_count: Option<u64>,
-    /// 执行ID（可选）
     pub execute_id: Option<u64>,
 }
 
@@ -514,16 +470,29 @@ fn parse_digits_forward(s: &str, mut i: usize) -> Option<(u64, usize)> {
     Some((val, i))
 }
 
-// 辅助：将记录分割成 (ts, meta_raw, body)，均为 &str（借用）
+/// 将记录分割成四个部分：ts（时间戳）、meta（元信息）、body（SQL体）、end（指标）
+/// 
+/// 规则：
+/// 1. ts 和 meta 必定在首行
+/// 2. body 可能跨多行
+/// 3. end 可能不存在
+/// 4. end 必定在最后一行（如果存在），紧跟在 body 之后
+/// 5. 指标信息（EXECTIME、ROWCOUNT、EXEC_ID）只在 end 中提取
 fn split_ts_meta_body<'a>(rec: &'a str) -> (&'a str, &'a str, &'a str) {
+    // 1. 提取 ts（时间戳，固定 23 字符）
     let ts: &'a str = if rec.len() >= 23 { &rec[..23] } else { "" };
     let after_ts: &'a str = if rec.len() > 23 { &rec[23..] } else { "" };
+    
     let mut meta_raw: &'a str = "";
     let mut body: &'a str = "";
 
+    // 2. 提取 meta（元信息在括号内）
     if let Some(open_idx) = after_ts.find('(') {
         if let Some(close_rel) = after_ts[open_idx..].find(')') {
+            // meta 在括号内
             meta_raw = &after_ts[open_idx + 1..open_idx + close_rel];
+            
+            // body 从括号之后开始
             let body_start = 23 + open_idx + close_rel + 1;
             if body_start < rec.len() {
                 body = rec[body_start..].trim_start();
@@ -609,15 +578,27 @@ fn parse_meta(meta_raw: &str) -> MetaParts<'_> {
     parts
 }
 
-// 辅助：从 body 末尾反向提取数值指标（EXEC_ID, ROWCOUNT, EXECTIME）
+/// 从记录的 end 部分提取指标信息（EXECTIME、ROWCOUNT、EXEC_ID）
+/// 
+/// end 部分特征：
+/// 1. 必定在最后一行（如果存在）
+/// 2. 紧跟在 body 之后，格式如：EXECTIME: 15ms ROWCOUNT: 1 EXEC_ID: 1001
+/// 3. end 可能不存在
+/// 4. 指标的顺序是固定的：EXECTIME -> ROWCOUNT -> EXEC_ID
+/// 
+/// 返回：(execute_time_ms, row_count, execute_id)
 fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
     let mut execute_id: Option<u64> = None;
     let mut row_count: Option<u64> = None;
     let mut execute_time_ms: Option<u64> = None;
 
+    // 从最后一行反向查找指标
+    // 因为 end 必定在最后一行，所以我们从后往前搜索
+    
     let body_str = body;
     let mut search_end = body_str.len();
 
+    // 反向查找 EXEC_ID（最后一个指标）
     if let Some(pos) = body_str[..search_end].rfind("EXEC_ID:") {
         let start = pos + "EXEC_ID:".len();
         if let Some((v, _)) = parse_digits_forward(body_str, start) {
@@ -626,6 +607,7 @@ fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
         search_end = pos;
     }
 
+    // 反向查找 ROWCOUNT（中间指标）
     if let Some(pos) = body_str[..search_end].rfind("ROWCOUNT:") {
         let start = pos + "ROWCOUNT:".len();
         if let Some((v, _)) = parse_digits_forward(body_str, start) {
@@ -634,6 +616,7 @@ fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
         search_end = pos;
     }
 
+    // 反向查找 EXECTIME（第一个指标）
     if let Some(pos) = body_str[..search_end].rfind("EXECTIME:") {
         let start = pos + "EXECTIME:".len();
         if let Some((v, _)) = parse_digits_forward(body_str, start) {
@@ -649,11 +632,13 @@ fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
 /// 该函数将一条日志记录文本解析为 `ParsedRecord` 结构体。
 /// 返回的结构体中的所有字符串字段都是对输入文本的引用，不会产生额外的内存分配。
 ///
-/// 记录结构：
-/// 1. **ts** - 时间戳（必定在首行）
-/// 2. **meta** - 元信息（必定在首行）
-/// 3. **body** - SQL 主体（可能跨多行）
-/// 4. **end** - 执行信息（可选，如果存在必定在最后一行）
+/// # 记录结构
+///
+/// 每条记录由四个部分组成：
+/// 1. **ts** (时间戳) - 必定在首行，固定 23 字符，格式：YYYY-MM-DD HH:MM:SS.mmm
+/// 2. **meta** (元信息) - 必定在首行，括号内，包含 EP、sess、thrd、user、trxid、stmt、appname 等
+/// 3. **body** (SQL语句体) - 可能跨多行，包含实际的 SQL 语句
+/// 4. **end** (指标信息) - 可选，必定在最后一行（如果存在），包含 EXECTIME、ROWCOUNT、EXEC_ID
 ///
 /// # 参数
 ///
@@ -670,83 +655,36 @@ fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
 ///
 /// let record_text = "2025-08-12 10:57:09.562 (EP[0] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) SELECT 1";
 /// let parsed = parse_record(record_text);
-/// println!("时间戳: {}, 用户: {}", parsed.ts, parsed.user);
+/// println!("用户: {}, 事务ID: {}", parsed.user, parsed.trxid);
 /// ```
 pub fn parse_record(rec: &'_ str) -> ParsedRecord<'_> {
     // 1) 将记录分割为 ts / meta_raw / body
-    let (ts, meta_raw, mut body) = split_ts_meta_body(rec);
+    //    - ts: 时间戳（首行，23字符）
+    //    - meta_raw: 元信息（首行，括号内）
+    //    - body: SQL语句体（可能多行）+ end指标（最后一行，可选）
+    let (ts, meta_raw, body) = split_ts_meta_body(rec);
 
-    // 2) 提取完整的 meta 部分（从时间戳后到 body 开始前）
-    let meta = if rec.len() > 23 {
-        let after_ts_start = 23;
-        if let Some(open_idx) = rec[after_ts_start..].find('(') {
-            if let Some(close_idx) = rec[after_ts_start + open_idx..].find(')') {
-                let meta_end = after_ts_start + open_idx + close_idx + 1;
-                &rec[after_ts_start..meta_end]
-            } else {
-                ""
-            }
-        } else {
-            ""
-        }
-    } else {
-        ""
-    };
+    // 2) 解析 meta 字段
+    let meta = parse_meta(meta_raw);
 
-    // 3) 分离 body 和 end 部分
-    // end 必定在最后一行，格式为 "EXECTIME: Xms ROWCOUNT: Y EXEC_ID: Z"
-    let (body_part, end_part) = if body.contains("EXECTIME:") {
-        // 查找最后一个换行符
-        if let Some(last_newline) = body.rfind('\n') {
-            let potential_end = &body[last_newline + 1..];
-            // 检查是否包含 EXECTIME
-            if potential_end.trim_start().starts_with("EXECTIME:") {
-                (&body[..last_newline], Some(potential_end.trim()))
-            } else {
-                (body, None)
-            }
-        } else {
-            // 整个 body 就是 end 行
-            if body.trim_start().starts_with("EXECTIME:") {
-                ("", Some(body.trim()))
-            } else {
-                (body, None)
-            }
-        }
-    } else {
-        (body, None)
-    };
-
-    body = body_part;
-    let end = end_part;
-
-    // 4) 解析 meta 字段
-    let meta_parsed = parse_meta(meta_raw);
-
-    // 5) 从 body 或 end 解析数值指标
-    let (execute_time_ms, row_count, execute_id) = if let Some(end_line) = end {
-        parse_body_metrics(end_line)
-    } else {
-        parse_body_metrics(body)
-    };
+    // 3) 从 body 的 end 部分解析数值指标
+    //    - EXECTIME: 执行时间（毫秒）
+    //    - ROWCOUNT: 影响行数
+    //    - EXEC_ID: 执行ID
+    let (execute_time_ms, row_count, execute_id) = parse_body_metrics(body);
 
     ParsedRecord {
-        // 核心四部分
         ts,
-        meta,
-        body,
-        end,
-        
-        // 解析字段
         meta_raw,
-        ep: meta_parsed.ep,
-        sess: meta_parsed.sess,
-        thrd: meta_parsed.thrd,
-        user: meta_parsed.user,
-        trxid: meta_parsed.trxid,
-        stmt: meta_parsed.stmt,
-        appname: meta_parsed.appname,
-        ip: meta_parsed.ip,
+        ep: meta.ep,
+        sess: meta.sess,
+        thrd: meta.thrd,
+        user: meta.user,
+        trxid: meta.trxid,
+        stmt: meta.stmt,
+        appname: meta.appname,
+        ip: meta.ip,
+        body,
         execute_time_ms,
         row_count,
         execute_id,
