@@ -704,8 +704,8 @@ mod tests {
 
     #[test]
     fn test_watch_file_modification() {
-        use std::io::Write;
         use std::fs::OpenOptions;
+        use std::io::Write;
 
         let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path().to_path_buf();
@@ -769,7 +769,7 @@ mod tests {
         use std::io::Write;
 
         let mut temp_file = NamedTempFile::new().unwrap();
-        
+
         // 写入带有空行的内容
         writeln!(temp_file, "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1").unwrap();
         writeln!(temp_file, "").unwrap(); // 空行
@@ -783,7 +783,7 @@ mod tests {
             .unwrap();
 
         let lines = parser.read_new_content().unwrap();
-        
+
         // 空行应该被过滤掉
         assert_eq!(lines.len(), 2); // 只有两条有效记录
         assert!(lines[0].contains("SELECT 1"));
@@ -806,9 +806,11 @@ mod tests {
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = received.clone();
 
-        parser.process_lines(lines, |sqllog| {
-            received_clone.lock().unwrap().push(sqllog);
-        }).unwrap();
+        parser
+            .process_lines(lines, |sqllog| {
+                received_clone.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
 
         // 第一条记录应该被触发完成（因为第二条记录开始了）
         let sqllogs = received.lock().unwrap();
@@ -856,9 +858,11 @@ mod tests {
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = received.clone();
 
-        parser.process_lines(lines, |sqllog| {
-            received_clone.lock().unwrap().push(sqllog);
-        }).unwrap();
+        parser
+            .process_lines(lines, |sqllog| {
+                received_clone.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
 
         // 第一条记录应该被处理（被第二条触发）
         let sqllogs = received.lock().unwrap();
@@ -866,4 +870,3 @@ mod tests {
         assert_eq!(sqllogs[0].meta.username, "alice");
     }
 }
-

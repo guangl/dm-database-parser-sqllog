@@ -70,11 +70,11 @@ fn main() {
         println!("🔑 会话ID:  {}", sqllog.meta.sess_id);
         println!("🧵 线程ID:  {}", sqllog.meta.thrd_id);
         println!("📦 事务ID:  {}", sqllog.meta.trxid);
-        println!("📋 语句ID:  {}", sqllog.meta.stmt_id);
+        println!("📋 语句ID:  {}", sqllog.meta.statement);
         println!("📱 应用名:  {}", sqllog.meta.appname);
 
-        if let Some(ref ip) = sqllog.meta.client_ip {
-            println!("🌐 客户端IP: {}", ip);
+        if !sqllog.meta.client_ip.is_empty() {
+            println!("🌐 客户端IP: {}", sqllog.meta.client_ip);
         }
 
         println!("\n💾 SQL 语句:");
@@ -82,9 +82,9 @@ fn main() {
 
         if let Some(ref indicators) = sqllog.indicators {
             println!("\n📊 性能指标:");
-            println!("  ⏱️  执行时间: {} ms", indicators.exectime);
-            println!("  📊 影响行数: {}", indicators.rowcount);
-            println!("  🔢 执行ID:   {}", indicators.exec_id);
+            println!("  ⏱️  执行时间: {} ms", indicators.execute_time);
+            println!("  📊 影响行数: {}", indicators.row_count);
+            println!("  🔢 执行ID:   {}", indicators.execute_id);
         }
         println!();
     });
