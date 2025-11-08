@@ -3,9 +3,23 @@
 /// 该结构体包含从日志文本中解析出的所有字段。所有字符串字段都是对原始输入文本的引用，
 /// 因此不会产生额外的内存分配。
 ///
+/// # 记录结构（四部分）
+///
+/// 每条记录由四个部分组成：
+/// 1. **ts** - 时间戳（必定在首行）
+/// 2. **meta** - 元信息（必定在首行，跟在时间戳后）
+/// 3. **body** - SQL 主体（可能跨多行）
+/// 4. **end** - 执行信息（可选，如果存在必定在最后一行）
+///
 /// # 字段说明
 ///
-/// - `ts`: 时间戳字符串（格式：`YYYY-MM-DD HH:MM:SS.mmm`）
+/// ## 核心四部分
+/// - `ts`: 时间戳字符串（格式：`YYYY-MM-DD HH:MM:SS.mmm`），必定在首行
+/// - `meta`: 完整的元信息部分（从时间戳后到 SQL 主体前的内容），必定在首行
+/// - `body`: SQL 主体内容（可能跨多行）
+/// - `end`: 执行信息行（可选，格式：`EXECTIME: Xms ROWCOUNT: Y EXEC_ID: Z`），如果存在必定在最后一行
+///
+/// ## 解析字段
 /// - `meta_raw`: 原始元信息字符串（括号内的内容）
 /// - `ep`: 执行计划标识符
 /// - `sess`: 会话标识符
@@ -15,7 +29,6 @@
 /// - `stmt`: 语句标识符
 /// - `appname`: 应用程序名称
 /// - `ip`: 客户端IP地址（可选）
-/// - `body`: 记录主体内容（SQL语句等）
 /// - `execute_time_ms`: 执行时间（毫秒，可选）
 /// - `row_count`: 影响的行数（可选）
 /// - `execute_id`: 执行ID（可选）
@@ -25,25 +38,56 @@
 /// ```rust
 /// use dm_database_parser_sqllog::parse_record;
 ///
-/// let log_text = "2025-08-12 10:57:09.562 (EP[0] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) SELECT 1";
+/// let log_text = "2025-08-12 10:57:09.562 (EP[0] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) SELECT 1\nEXECTIME: 10ms ROWCOUNT: 1 EXEC_ID: 100";
 /// let parsed = parse_record(log_text);
+/// 
+/// // 四部分结构
+/// println!("时间戳: {}", parsed.ts);
+/// println!("元信息: {}", parsed.meta);
+/// println!("SQL主体: {}", parsed.body);
+/// if let Some(end) = parsed.end {
+///     println!("执行信息: {}", end);
+/// }
+/// 
+/// // 解析字段
 /// println!("用户: {}, 事务ID: {}", parsed.user, parsed.trxid);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedRecord<'a> {
+    // === 核心四部分 ===
+    /// 时间戳部分（必定在首行）
     pub ts: &'a str,
-    pub meta_raw: &'a str,
-    pub ep: &'a str,
-    pub sess: &'a str,
-    pub thrd: &'a str,
-    pub user: &'a str,
-    pub trxid: &'a str,
-    pub stmt: &'a str,
-    pub appname: &'a str,
-    pub ip: Option<&'a str>,
+    /// 完整元信息部分（必定在首行，包含括号及内容）
+    pub meta: &'a str,
+    /// SQL 主体（可能跨多行）
     pub body: &'a str,
+    /// 执行信息行（可选，如果存在必定在最后一行）
+    pub end: Option<&'a str>,
+    
+    // === 解析后的字段 ===
+    /// 原始元信息字符串（括号内的内容）
+    pub meta_raw: &'a str,
+    /// 执行计划标识符
+    pub ep: &'a str,
+    /// 会话标识符
+    pub sess: &'a str,
+    /// 线程标识符
+    pub thrd: &'a str,
+    /// 用户名
+    pub user: &'a str,
+    /// 事务ID
+    pub trxid: &'a str,
+    /// 语句标识符
+    pub stmt: &'a str,
+    /// 应用程序名称
+    pub appname: &'a str,
+    /// 客户端IP地址（可选）
+    pub ip: Option<&'a str>,
+    /// 执行时间（毫秒，可选）
     pub execute_time_ms: Option<u64>,
+    /// 影响的行数（可选）
     pub row_count: Option<u64>,
+    /// 执行ID（可选）
     pub execute_id: Option<u64>,
 }
 
@@ -605,6 +649,12 @@ fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
 /// 该函数将一条日志记录文本解析为 `ParsedRecord` 结构体。
 /// 返回的结构体中的所有字符串字段都是对输入文本的引用，不会产生额外的内存分配。
 ///
+/// 记录结构：
+/// 1. **ts** - 时间戳（必定在首行）
+/// 2. **meta** - 元信息（必定在首行）
+/// 3. **body** - SQL 主体（可能跨多行）
+/// 4. **end** - 执行信息（可选，如果存在必定在最后一行）
+///
 /// # 参数
 ///
 /// * `rec` - 单条日志记录的文本（通常由 `RecordSplitter` 或相关函数产生）
@@ -620,30 +670,83 @@ fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
 ///
 /// let record_text = "2025-08-12 10:57:09.562 (EP[0] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) SELECT 1";
 /// let parsed = parse_record(record_text);
-/// println!("用户: {}, 事务ID: {}", parsed.user, parsed.trxid);
+/// println!("时间戳: {}, 用户: {}", parsed.ts, parsed.user);
 /// ```
 pub fn parse_record(rec: &'_ str) -> ParsedRecord<'_> {
     // 1) 将记录分割为 ts / meta_raw / body
-    let (ts, meta_raw, body) = split_ts_meta_body(rec);
+    let (ts, meta_raw, mut body) = split_ts_meta_body(rec);
 
-    // 2) 解析 meta 字段
-    let meta = parse_meta(meta_raw);
+    // 2) 提取完整的 meta 部分（从时间戳后到 body 开始前）
+    let meta = if rec.len() > 23 {
+        let after_ts_start = 23;
+        if let Some(open_idx) = rec[after_ts_start..].find('(') {
+            if let Some(close_idx) = rec[after_ts_start + open_idx..].find(')') {
+                let meta_end = after_ts_start + open_idx + close_idx + 1;
+                &rec[after_ts_start..meta_end]
+            } else {
+                ""
+            }
+        } else {
+            ""
+        }
+    } else {
+        ""
+    };
 
-    // 3) 从 body 解析数值指标
-    let (execute_time_ms, row_count, execute_id) = parse_body_metrics(body);
+    // 3) 分离 body 和 end 部分
+    // end 必定在最后一行，格式为 "EXECTIME: Xms ROWCOUNT: Y EXEC_ID: Z"
+    let (body_part, end_part) = if body.contains("EXECTIME:") {
+        // 查找最后一个换行符
+        if let Some(last_newline) = body.rfind('\n') {
+            let potential_end = &body[last_newline + 1..];
+            // 检查是否包含 EXECTIME
+            if potential_end.trim_start().starts_with("EXECTIME:") {
+                (&body[..last_newline], Some(potential_end.trim()))
+            } else {
+                (body, None)
+            }
+        } else {
+            // 整个 body 就是 end 行
+            if body.trim_start().starts_with("EXECTIME:") {
+                ("", Some(body.trim()))
+            } else {
+                (body, None)
+            }
+        }
+    } else {
+        (body, None)
+    };
+
+    body = body_part;
+    let end = end_part;
+
+    // 4) 解析 meta 字段
+    let meta_parsed = parse_meta(meta_raw);
+
+    // 5) 从 body 或 end 解析数值指标
+    let (execute_time_ms, row_count, execute_id) = if let Some(end_line) = end {
+        parse_body_metrics(end_line)
+    } else {
+        parse_body_metrics(body)
+    };
 
     ParsedRecord {
+        // 核心四部分
         ts,
-        meta_raw,
-        ep: meta.ep,
-        sess: meta.sess,
-        thrd: meta.thrd,
-        user: meta.user,
-        trxid: meta.trxid,
-        stmt: meta.stmt,
-        appname: meta.appname,
-        ip: meta.ip,
+        meta,
         body,
+        end,
+        
+        // 解析字段
+        meta_raw,
+        ep: meta_parsed.ep,
+        sess: meta_parsed.sess,
+        thrd: meta_parsed.thrd,
+        user: meta_parsed.user,
+        trxid: meta_parsed.trxid,
+        stmt: meta_parsed.stmt,
+        appname: meta_parsed.appname,
+        ip: meta_parsed.ip,
         execute_time_ms,
         row_count,
         execute_id,
