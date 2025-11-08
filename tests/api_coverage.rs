@@ -367,7 +367,7 @@ invalid log line
 2025-08-12 10:57:09.549 (EP[1] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2"#;
 
     let results = parse_sqllogs_from_string(log);
-    
+
     // 有效的记录应该成功解析
     let successes: Vec<_> = results.iter().filter(|r| r.is_ok()).collect();
     assert_eq!(successes.len(), 2);
@@ -382,7 +382,8 @@ fn test_for_each_sqllog_multiline() {
     let mut bodies = Vec::new();
     let count = for_each_sqllog(reader, |sqllog| {
         bodies.push(sqllog.body.clone());
-    }).unwrap();
+    })
+    .unwrap();
 
     assert_eq!(count, 1);
     assert!(bodies[0].contains("FROM users"));
@@ -476,3 +477,31 @@ fn test_for_each_sqllog_callback_count() {
     assert_eq!(result.unwrap(), 3);
 }
 
+/// 测试 for_each_sqllog 处理空数据
+#[test]
+fn test_for_each_sqllog_empty_reader() {
+    let reader = std::io::Cursor::new(b"");
+    let result = for_each_sqllog(reader, |_| {});
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), 0);
+}
+
+/// 测试 parse_records_from_string 处理包含性能指标的记录
+#[test]
+fn test_parse_records_from_string_with_performance() {
+    let log = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1 EXECTIME:10.5(ms) ROWCOUNT:100(rows) EXEC_ID:xyz789";
+    let records = parse_records_from_string(log);
+    assert_eq!(records.len(), 1);
+    assert!(records[0].lines[0].contains("EXECTIME"));
+}
+
+/// 测试 parse_sqllogs_from_string 返回所有结果（包括错误）
+#[test]
+fn test_parse_sqllogs_from_string_all_results() {
+    let log = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1\ninvalid\n2025";
+    let results = parse_sqllogs_from_string(log);
+
+    // 应该包含成功和失败的结果
+    let ok_count = results.iter().filter(|r| r.is_ok()).count();
+    assert_eq!(ok_count, 1);
+}

@@ -871,3 +871,123 @@ fn test_parse_record_with_empty_lines() {
     assert!(sqllog.body.contains("FROM users"));
     assert!(sqllog.body.contains("WHERE id = 1"));
 }
+
+#[test]
+fn test_parse_meta_only_5_fields() {
+    use super::parse_functions::parse_meta;
+
+    // 只有 5 个必需字段（EP, sess, thrd, user, trxid）
+    let meta_str = "EP[0] sess:123 thrd:456 user:alice trxid:789";
+    let result = parse_meta(meta_str);
+    assert!(result.is_ok());
+
+    let meta = result.unwrap();
+    assert_eq!(meta.ep, 0);
+    assert_eq!(meta.sess_id, "123");
+    assert_eq!(meta.thrd_id, "456");
+    assert_eq!(meta.username, "alice");
+    assert_eq!(meta.trxid, "789");
+    assert_eq!(meta.statement, ""); // 默认值
+    assert_eq!(meta.appname, ""); // 默认值
+    assert_eq!(meta.client_ip, ""); // 默认值
+}
+
+#[test]
+fn test_parse_meta_only_6_fields() {
+    use super::parse_functions::parse_meta;
+
+    // 6 个字段（包含 stmt，但没有 appname 和 ip）
+    let meta_str = "EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999";
+    let result = parse_meta(meta_str);
+    assert!(result.is_ok());
+
+    let meta = result.unwrap();
+    assert_eq!(meta.ep, 0);
+    assert_eq!(meta.sess_id, "123");
+    assert_eq!(meta.thrd_id, "456");
+    assert_eq!(meta.username, "alice");
+    assert_eq!(meta.trxid, "789");
+    assert_eq!(meta.statement, "999");
+    assert_eq!(meta.appname, ""); // 默认值
+    assert_eq!(meta.client_ip, ""); // 默认值
+}
+
+#[test]
+fn test_parse_meta_appname_with_ip() {
+    use super::parse_functions::parse_meta;
+
+    // appname 后面跟着 IP 字段
+    let meta_str = "EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:myapp ip:::ffff:192.168.1.100";
+    let result = parse_meta(meta_str);
+    assert!(result.is_ok());
+
+    let meta = result.unwrap();
+    assert_eq!(meta.ep, 0);
+    assert_eq!(meta.appname, "myapp");
+    assert_eq!(meta.client_ip, "192.168.1.100"); // extract_field_value 会去掉 "ip:::ffff:" 前缀
+}
+
+#[test]
+fn test_parse_meta_appname_with_spaces_and_ip() {
+    use super::parse_functions::parse_meta;
+
+    // appname 包含空格并且后面有 IP
+    let meta_str = "EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:my app name ip:::ffff:10.0.0.1";
+    let result = parse_meta(meta_str);
+    assert!(result.is_ok());
+
+    let meta = result.unwrap();
+    assert_eq!(meta.appname, "my app name");
+    assert_eq!(meta.client_ip, "10.0.0.1"); // extract_field_value 会去掉 "ip:::ffff:" 前缀
+}
+
+#[test]
+fn test_parse_meta_no_appname_field() {
+    use super::parse_functions::parse_meta;
+
+    // stmt 后面没有 appname 字段（直接结束）
+    let meta_str = "EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999";
+    let result = parse_meta(meta_str);
+    assert!(result.is_ok());
+
+    let meta = result.unwrap();
+    assert_eq!(meta.statement, "999");
+    assert_eq!(meta.appname, "");
+    assert_eq!(meta.client_ip, "");
+}
+
+#[test]
+fn test_build_body_edge_cases() {
+    use super::parse_functions::build_body;
+
+    // body_start 超出范围，但有 continuation_lines
+    let first_line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789) ";
+    let continuation = vec!["SELECT 1", "FROM dual"];
+    let result = build_body(first_line, first_line.len() + 10, &continuation);
+    assert_eq!(result, "SELECT 1\nFROM dual");
+
+    // 第一行为空，从第一个 continuation_line 开始
+    let result2 = build_body("short", 10, &["line1", "line2", "line3"]);
+    assert_eq!(result2, "line1\nline2\nline3");
+}
+
+#[test]
+fn test_extract_sql_body_pure_sql() {
+    use super::parse_functions::extract_sql_body;
+
+    // 没有任何 indicators
+    let body = "SELECT * FROM users WHERE id = 1";
+    let result = extract_sql_body(body);
+    assert_eq!(result, body);
+}
+
+#[test]
+fn test_extract_sql_body_multiple_possible_indicators() {
+    use super::parse_functions::extract_sql_body;
+
+    // 有多个可能的 indicator 前缀，应该选择最早出现的
+    let body = "SELECT * FROM users WHERE EXECTIME: 10.5(ms) ROWCOUNT: 100(rows)";
+    let result = extract_sql_body(body);
+    assert!(result.len() < body.len());
+    assert!(result.contains("SELECT * FROM users WHERE"));
+}
