@@ -75,6 +75,9 @@ pub mod parser;
 pub mod sqllog;
 pub mod tools;
 
+#[cfg(feature = "realtime")]
+pub mod realtime;
+
 pub use error::ParseError;
 pub use parser::{
     Record,

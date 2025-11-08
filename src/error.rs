@@ -108,4 +108,8 @@ pub enum ParseError {
         /// 原始 body 内容
         raw: String,
     },
+
+    /// IO 操作错误
+    #[error("IO error: {0}")]
+    IoError(String),
 }
