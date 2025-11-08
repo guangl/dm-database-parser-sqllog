@@ -156,3 +156,175 @@ impl MetaParts {
         !self.client_ip.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sqllog_has_indicators() {
+        // 测试有指标的情况
+        let sqllog = Sqllog {
+            ts: "2025-08-12 10:57:09.548".to_string(),
+            meta: MetaParts::default(),
+            body: "SELECT 1".to_string(),
+            indicators: Some(IndicatorsParts {
+                execute_time: 10.5,
+                row_count: 100,
+                execute_id: 12345,
+            }),
+        };
+        assert!(sqllog.has_indicators());
+
+        // 测试没有指标的情况
+        let sqllog_no_indicators = Sqllog {
+            ts: "2025-08-12 10:57:09.548".to_string(),
+            meta: MetaParts::default(),
+            body: "SELECT 1".to_string(),
+            indicators: None,
+        };
+        assert!(!sqllog_no_indicators.has_indicators());
+    }
+
+    #[test]
+    fn test_sqllog_execute_time() {
+        // 测试有指标的情况
+        let sqllog = Sqllog {
+            ts: "2025-08-12 10:57:09.548".to_string(),
+            meta: MetaParts::default(),
+            body: "SELECT 1".to_string(),
+            indicators: Some(IndicatorsParts {
+                execute_time: 10.5,
+                row_count: 100,
+                execute_id: 12345,
+            }),
+        };
+        assert_eq!(sqllog.execute_time(), Some(10.5));
+
+        // 测试没有指标的情况
+        let sqllog_no_indicators = Sqllog {
+            ts: "2025-08-12 10:57:09.548".to_string(),
+            meta: MetaParts::default(),
+            body: "SELECT 1".to_string(),
+            indicators: None,
+        };
+        assert_eq!(sqllog_no_indicators.execute_time(), None);
+    }
+
+    #[test]
+    fn test_sqllog_row_count() {
+        // 测试有指标的情况
+        let sqllog = Sqllog {
+            ts: "2025-08-12 10:57:09.548".to_string(),
+            meta: MetaParts::default(),
+            body: "SELECT 1".to_string(),
+            indicators: Some(IndicatorsParts {
+                execute_time: 10.5,
+                row_count: 100,
+                execute_id: 12345,
+            }),
+        };
+        assert_eq!(sqllog.row_count(), Some(100));
+
+        // 测试没有指标的情况
+        let sqllog_no_indicators = Sqllog {
+            ts: "2025-08-12 10:57:09.548".to_string(),
+            meta: MetaParts::default(),
+            body: "SELECT 1".to_string(),
+            indicators: None,
+        };
+        assert_eq!(sqllog_no_indicators.row_count(), None);
+    }
+
+    #[test]
+    fn test_sqllog_execute_id() {
+        // 测试有指标的情况
+        let sqllog = Sqllog {
+            ts: "2025-08-12 10:57:09.548".to_string(),
+            meta: MetaParts::default(),
+            body: "SELECT 1".to_string(),
+            indicators: Some(IndicatorsParts {
+                execute_time: 10.5,
+                row_count: 100,
+                execute_id: 12345,
+            }),
+        };
+        assert_eq!(sqllog.execute_id(), Some(12345));
+
+        // 测试没有指标的情况
+        let sqllog_no_indicators = Sqllog {
+            ts: "2025-08-12 10:57:09.548".to_string(),
+            meta: MetaParts::default(),
+            body: "SELECT 1".to_string(),
+            indicators: None,
+        };
+        assert_eq!(sqllog_no_indicators.execute_id(), None);
+    }
+
+    #[test]
+    fn test_meta_has_client_ip() {
+        // 测试有 IP 的情况
+        let meta_with_ip = MetaParts {
+            ep: 0,
+            sess_id: "123".to_string(),
+            thrd_id: "456".to_string(),
+            username: "alice".to_string(),
+            trxid: "789".to_string(),
+            statement: "999".to_string(),
+            appname: "app".to_string(),
+            client_ip: "192.168.1.1".to_string(),
+        };
+        assert!(meta_with_ip.has_client_ip());
+
+        // 测试没有 IP 的情况
+        let meta_no_ip = MetaParts {
+            ep: 0,
+            sess_id: "123".to_string(),
+            thrd_id: "456".to_string(),
+            username: "alice".to_string(),
+            trxid: "789".to_string(),
+            statement: "999".to_string(),
+            appname: "app".to_string(),
+            client_ip: "".to_string(),
+        };
+        assert!(!meta_no_ip.has_client_ip());
+    }
+
+    #[test]
+    fn test_indicators_copy_trait() {
+        let indicators = IndicatorsParts {
+            execute_time: 10.5,
+            row_count: 100,
+            execute_id: 12345,
+        };
+        let copied = indicators;
+        assert_eq!(indicators.execute_time, copied.execute_time);
+        assert_eq!(indicators.row_count, copied.row_count);
+        assert_eq!(indicators.execute_id, copied.execute_id);
+    }
+
+    #[test]
+    fn test_sqllog_default() {
+        let sqllog = Sqllog::default();
+        assert_eq!(sqllog.ts, "");
+        assert_eq!(sqllog.body, "");
+        assert!(sqllog.indicators.is_none());
+    }
+
+    #[test]
+    fn test_meta_default() {
+        let meta = MetaParts::default();
+        assert_eq!(meta.ep, 0);
+        assert_eq!(meta.sess_id, "");
+        assert_eq!(meta.username, "");
+        assert!(!meta.has_client_ip());
+    }
+
+    #[test]
+    fn test_indicators_default() {
+        let indicators = IndicatorsParts::default();
+        assert_eq!(indicators.execute_time, 0.0);
+        assert_eq!(indicators.row_count, 0);
+        assert_eq!(indicators.execute_id, 0);
+    }
+}

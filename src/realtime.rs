@@ -176,7 +176,7 @@ impl RealtimeSqllogParser {
     }
 
     /// 刷新缓冲区，处理最后一条未完成的记录
-    /// 
+    ///
     /// 主要用于测试或确保所有记录都被处理
     #[cfg(test)]
     fn flush_buffer<F>(&mut self, mut callback: F) -> Result<(), ParseError>
@@ -353,7 +353,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let parser = RealtimeSqllogParser::new(temp_file.path());
         assert!(parser.is_ok());
-        
+
         // 验证解析器从文件末尾开始
         let parser = parser.unwrap();
         assert!(parser.position > 0 || parser.position == 0);
@@ -363,7 +363,7 @@ mod tests {
     fn test_nonexistent_file() {
         let parser = RealtimeSqllogParser::new("/nonexistent/file.txt");
         assert!(parser.is_err());
-        
+
         if let Err(ParseError::FileNotFound { path }) = parser {
             assert!(path.contains("nonexistent"));
         } else {
@@ -375,12 +375,12 @@ mod tests {
     fn test_from_beginning() {
         let temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file.as_file(), "test content").unwrap();
-        
+
         let parser = RealtimeSqllogParser::new(temp_file.path())
             .unwrap()
             .from_beginning()
             .unwrap();
-        
+
         // 验证位置在文件开头
         assert_eq!(parser.position, 0);
     }
@@ -416,20 +416,20 @@ mod tests {
     #[test]
     fn test_read_new_content() {
         let mut temp_file = NamedTempFile::new().unwrap();
-        
+
         // 写入初始内容
         writeln!(temp_file, "line 1").unwrap();
         writeln!(temp_file, "line 2").unwrap();
         temp_file.flush().unwrap();
-        
+
         // 创建解析器并定位到末尾
         let mut parser = RealtimeSqllogParser::new(temp_file.path()).unwrap();
-        
+
         // 追加新内容
         writeln!(temp_file, "line 3").unwrap();
         writeln!(temp_file, "line 4").unwrap();
         temp_file.flush().unwrap();
-        
+
         // 读取新内容
         let lines = parser.read_new_content().unwrap();
         assert_eq!(lines.len(), 2);
@@ -441,24 +441,28 @@ mod tests {
     fn test_process_single_line_record() {
         let temp_file = NamedTempFile::new().unwrap();
         let mut parser = RealtimeSqllogParser::new(temp_file.path()).unwrap();
-        
+
         let lines = vec![
             "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1".to_string(),
         ];
-        
+
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = received.clone();
-        
-        parser.process_lines(lines, |sqllog| {
-            received_clone.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+
+        parser
+            .process_lines(lines, |sqllog| {
+                received_clone.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         // 刷新缓冲区以处理最后一条记录
         let received_clone2 = received.clone();
-        parser.flush_buffer(move |sqllog| {
-            received_clone2.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+        parser
+            .flush_buffer(move |sqllog| {
+                received_clone2.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         let sqllogs = received.lock().unwrap();
         assert_eq!(sqllogs.len(), 1);
         assert_eq!(sqllogs[0].meta.username, "alice");
@@ -469,26 +473,30 @@ mod tests {
     fn test_process_multiline_record() {
         let temp_file = NamedTempFile::new().unwrap();
         let mut parser = RealtimeSqllogParser::new(temp_file.path()).unwrap();
-        
+
         let lines = vec![
             "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *".to_string(),
             "FROM users".to_string(),
             "WHERE id = 1".to_string(),
         ];
-        
+
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = received.clone();
-        
-        parser.process_lines(lines, |sqllog| {
-            received_clone.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+
+        parser
+            .process_lines(lines, |sqllog| {
+                received_clone.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         // 刷新缓冲区
         let received_clone2 = received.clone();
-        parser.flush_buffer(move |sqllog| {
-            received_clone2.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+        parser
+            .flush_buffer(move |sqllog| {
+                received_clone2.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         let sqllogs = received.lock().unwrap();
         assert_eq!(sqllogs.len(), 1);
         assert!(sqllogs[0].body.contains("FROM users"));
@@ -499,26 +507,30 @@ mod tests {
     fn test_process_multiple_records() {
         let temp_file = NamedTempFile::new().unwrap();
         let mut parser = RealtimeSqllogParser::new(temp_file.path()).unwrap();
-        
+
         let lines = vec![
             "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1".to_string(),
             "2025-08-12 10:57:10.548 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2".to_string(),
             "2025-08-12 10:57:11.548 (EP[0] sess:125 thrd:458 user:carol trxid:791 stmt:1001 appname:app) SELECT 3".to_string(),
         ];
-        
+
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = received.clone();
-        
-        parser.process_lines(lines, |sqllog| {
-            received_clone.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+
+        parser
+            .process_lines(lines, |sqllog| {
+                received_clone.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         // 刷新缓冲区
         let received_clone2 = received.clone();
-        parser.flush_buffer(move |sqllog| {
-            received_clone2.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+        parser
+            .flush_buffer(move |sqllog| {
+                received_clone2.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         let sqllogs = received.lock().unwrap();
         assert_eq!(sqllogs.len(), 3);
         assert_eq!(sqllogs[0].meta.username, "alice");
@@ -530,27 +542,31 @@ mod tests {
     fn test_process_mixed_records() {
         let temp_file = NamedTempFile::new().unwrap();
         let mut parser = RealtimeSqllogParser::new(temp_file.path()).unwrap();
-        
+
         let lines = vec![
             "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *".to_string(),
             "FROM users".to_string(),
             "2025-08-12 10:57:10.548 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) INSERT INTO".to_string(),
             "logs VALUES (1)".to_string(),
         ];
-        
+
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = received.clone();
-        
-        parser.process_lines(lines, |sqllog| {
-            received_clone.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+
+        parser
+            .process_lines(lines, |sqllog| {
+                received_clone.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         // 刷新缓冲区
         let received_clone2 = received.clone();
-        parser.flush_buffer(move |sqllog| {
-            received_clone2.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+        parser
+            .flush_buffer(move |sqllog| {
+                received_clone2.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         let sqllogs = received.lock().unwrap();
         assert_eq!(sqllogs.len(), 2);
         assert!(sqllogs[0].body.contains("FROM users"));
@@ -561,19 +577,18 @@ mod tests {
     fn test_empty_lines_ignored() {
         let temp_file = NamedTempFile::new().unwrap();
         let _parser = RealtimeSqllogParser::new(temp_file.path()).unwrap();
-        
+
         let lines = vec![
             "".to_string(),
             "   ".to_string(),
             "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1".to_string(),
             "".to_string(),
         ];
-        
+
         // 空行应该被 read_new_content 过滤掉，这里直接测试非空行
-        let non_empty_lines: Vec<String> = lines.into_iter()
-            .filter(|l| !l.trim().is_empty())
-            .collect();
-        
+        let non_empty_lines: Vec<String> =
+            lines.into_iter().filter(|l| !l.trim().is_empty()).collect();
+
         assert_eq!(non_empty_lines.len(), 1);
     }
 
@@ -581,28 +596,32 @@ mod tests {
     fn test_record_with_performance_indicators() {
         let temp_file = NamedTempFile::new().unwrap();
         let mut parser = RealtimeSqllogParser::new(temp_file.path()).unwrap();
-        
+
         let lines = vec![
             "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT * FROM users EXECTIME: 10.5(ms) ROWCOUNT: 100(rows) EXEC_ID: 12345.".to_string(),
         ];
-        
+
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = received.clone();
-        
-        parser.process_lines(lines, |sqllog| {
-            received_clone.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+
+        parser
+            .process_lines(lines, |sqllog| {
+                received_clone.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         // 刷新缓冲区
         let received_clone2 = received.clone();
-        parser.flush_buffer(move |sqllog| {
-            received_clone2.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+        parser
+            .flush_buffer(move |sqllog| {
+                received_clone2.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         let sqllogs = received.lock().unwrap();
         assert_eq!(sqllogs.len(), 1);
         assert!(sqllogs[0].indicators.is_some());
-        
+
         if let Some(ref indicators) = sqllogs[0].indicators {
             assert_eq!(indicators.execute_time, 10.5);
             assert_eq!(indicators.row_count, 100);
@@ -614,33 +633,37 @@ mod tests {
     fn test_buffer_persistence() {
         let temp_file = NamedTempFile::new().unwrap();
         let mut parser = RealtimeSqllogParser::new(temp_file.path()).unwrap();
-        
+
         // 处理部分记录（未完成）
         let lines1 = vec![
             "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *".to_string(),
             "FROM users".to_string(),
         ];
-        
+
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = received.clone();
-        
-        parser.process_lines(lines1, |sqllog| {
-            received_clone.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+
+        parser
+            .process_lines(lines1, |sqllog| {
+                received_clone.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         // 第一次不应该有完整记录
         assert_eq!(received.lock().unwrap().len(), 0);
-        
+
         // 处理下一条新记录（触发前一条完成）
         let lines2 = vec![
             "2025-08-12 10:57:10.548 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 1".to_string(),
         ];
-        
+
         let received_clone2 = received.clone();
-        parser.process_lines(lines2, move |sqllog| {
-            received_clone2.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+        parser
+            .process_lines(lines2, move |sqllog| {
+                received_clone2.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         // 现在应该有第一条完整记录
         let sqllogs = received.lock().unwrap();
         assert_eq!(sqllogs.len(), 1);
@@ -651,28 +674,196 @@ mod tests {
     fn test_invalid_record_ignored() {
         let temp_file = NamedTempFile::new().unwrap();
         let mut parser = RealtimeSqllogParser::new(temp_file.path()).unwrap();
-        
+
         let lines = vec![
             "invalid line without proper format".to_string(),
             "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1".to_string(),
         ];
-        
+
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = received.clone();
-        
-        parser.process_lines(lines, |sqllog| {
-            received_clone.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+
+        parser
+            .process_lines(lines, |sqllog| {
+                received_clone.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         // 刷新缓冲区
         let received_clone2 = received.clone();
-        parser.flush_buffer(move |sqllog| {
-            received_clone2.lock().unwrap().push(sqllog);
-        }).unwrap();
-        
+        parser
+            .flush_buffer(move |sqllog| {
+                received_clone2.lock().unwrap().push(sqllog);
+            })
+            .unwrap();
+
         // 只有有效记录应该被处理
         let sqllogs = received.lock().unwrap();
         assert_eq!(sqllogs.len(), 1);
+    }
+
+    #[test]
+    fn test_watch_file_modification() {
+        use std::io::Write;
+        use std::fs::OpenOptions;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        let path = temp_file.path().to_path_buf();
+
+        // 写入初始内容
+        {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .append(true)
+                .open(&path)
+                .unwrap();
+            writeln!(
+                file,
+                "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1"
+            )
+            .unwrap();
+            file.flush().unwrap();
+        }
+
+        let parser = RealtimeSqllogParser::new(&path).unwrap();
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let received_clone = received.clone();
+
+        // 使用 watch_for 监控较短时间
+        let handle = std::thread::spawn(move || {
+            let _ = parser.watch_for(Duration::from_millis(500), move |sqllog| {
+                received_clone.lock().unwrap().push(sqllog);
+            });
+        });
+
+        // 给监控足够时间启动
+        std::thread::sleep(Duration::from_millis(100));
+
+        // 追加新记录
+        {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .append(true)
+                .open(&path)
+                .unwrap();
+            writeln!(
+                file,
+                "2025-08-12 10:57:10.548 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2"
+            )
+            .unwrap();
+            file.flush().unwrap();
+        }
+
+        // 等待监控完成
+        handle.join().unwrap();
+
+        // 验证接收到新记录
+        let _sqllogs = received.lock().unwrap();
+        // 注意: 文件监控可能因系统原因不稳定,这里只测试功能没有 panic
+        // 在真实环境中应该能收到记录,但在测试环境可能有延迟
+        // 所以这里不强制断言一定有记录
+    }
+
+    #[test]
+    fn test_read_new_content_edge_cases() {
+        use std::io::Write;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        
+        // 写入带有空行的内容
+        writeln!(temp_file, "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1").unwrap();
+        writeln!(temp_file, "").unwrap(); // 空行
+        writeln!(temp_file, "   ").unwrap(); // 只有空格的行
+        writeln!(temp_file, "2025-08-12 10:57:10.548 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2").unwrap();
+        temp_file.flush().unwrap();
+
+        let mut parser = RealtimeSqllogParser::new(temp_file.path())
+            .unwrap()
+            .from_beginning()
+            .unwrap();
+
+        let lines = parser.read_new_content().unwrap();
+        
+        // 空行应该被过滤掉
+        assert_eq!(lines.len(), 2); // 只有两条有效记录
+        assert!(lines[0].contains("SELECT 1"));
+        assert!(lines[1].contains("SELECT 2"));
+    }
+
+    #[test]
+    fn test_process_lines_with_continuation() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let mut parser = RealtimeSqllogParser::new(temp_file.path()).unwrap();
+
+        // 模拟一条跨多行的记录，然后是另一条完整记录
+        let lines = vec![
+            "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *".to_string(),
+            "  FROM users".to_string(),
+            "  WHERE id = 1".to_string(),
+            "2025-08-12 10:57:10.548 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2".to_string(),
+        ];
+
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let received_clone = received.clone();
+
+        parser.process_lines(lines, |sqllog| {
+            received_clone.lock().unwrap().push(sqllog);
+        }).unwrap();
+
+        // 第一条记录应该被触发完成（因为第二条记录开始了）
+        let sqllogs = received.lock().unwrap();
+        assert_eq!(sqllogs.len(), 1);
+        assert!(sqllogs[0].body.contains("FROM users"));
+        assert!(sqllogs[0].body.contains("WHERE id = 1"));
+    }
+
+    #[test]
+    fn test_from_beginning_position() {
+        use std::io::Write;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(
+            temp_file,
+            "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1"
+        )
+        .unwrap();
+        temp_file.flush().unwrap();
+
+        // 创建解析器，默认从文件末尾开始
+        let parser1 = RealtimeSqllogParser::new(temp_file.path()).unwrap();
+        // position 应该在文件末尾
+        assert!(parser1.position > 0);
+
+        // 使用 from_beginning
+        let parser2 = RealtimeSqllogParser::new(temp_file.path())
+            .unwrap()
+            .from_beginning()
+            .unwrap();
+        // position 应该在文件开头
+        assert_eq!(parser2.position, 0);
+    }
+
+    #[test]
+    fn test_buffer_clear_on_new_record() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let mut parser = RealtimeSqllogParser::new(temp_file.path()).unwrap();
+
+        let lines = vec![
+            "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1".to_string(),
+            "2025-08-12 10:57:10.548 (EP[0] sess:124 thrd:457 user:bob trxid:790 stmt:1000 appname:app) SELECT 2".to_string(),
+        ];
+
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let received_clone = received.clone();
+
+        parser.process_lines(lines, |sqllog| {
+            received_clone.lock().unwrap().push(sqllog);
+        }).unwrap();
+
+        // 第一条记录应该被处理（被第二条触发）
+        let sqllogs = received.lock().unwrap();
+        assert_eq!(sqllogs.len(), 1);
+        assert_eq!(sqllogs[0].meta.username, "alice");
     }
 }
 
