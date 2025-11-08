@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **新增依赖**：
   - `notify = "8.2"` - 跨平台文件系统监控（可选特性）
-  
+
 - **示例代码**：
   - `examples/realtime_watch.rs` - 实时监控示例
 
@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 更新 README.md 安装说明，包含 realtime 特性的启用方式
 - 更新相关链接，添加实时监控特性文档
 
-## [Unreleased]
+## [0.2.0]
 
 ### Changed
 - **错误信息增强**：所有 `ParseError` 变体现在都包含原始数据用于调试

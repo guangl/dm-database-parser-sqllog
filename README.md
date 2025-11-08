@@ -152,9 +152,9 @@ use std::time::Duration;
 // 从文件末尾开始监控新增日志
 let parser = RealtimeSqllogParser::new("sqllog.txt")?;
 parser.watch(|sqllog| {
-    println!("[{}] 用户: {}, SQL: {}", 
+    println!("[{}] 用户: {}, SQL: {}",
         sqllog.ts, sqllog.meta.username, sqllog.body);
-    
+
     // 检测慢查询
     if let Some(time) = sqllog.execute_time() {
         if time > 1000.0 {
@@ -414,4 +414,3 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 - [GitHub](https://github.com/guangl/dm-parser-sqllog)
 - [性能测试报告](docs/PERFORMANCE_BENCHMARK.md)
 - [实时监控特性文档](REALTIME_FEATURE.md)
-
