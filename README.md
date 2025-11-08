@@ -27,118 +27,205 @@ dm-database-parser-sqllog = "0.1"
 
 ### 基本用法
 
+### 从字符串解析
+
 ```rust
-use dm_database_parser_sqllog::{split_by_ts_records_with_errors, parse_record};
+use dm_database_parser_sqllog::{parse_records_from_string, parse_sqllogs_from_string};
 
-let log_text = r#"2025-08-12 10:57:09.562 (EP[0] sess:1 thrd:1 user:admin trxid:0 stmt:1 appname:MyApp) SELECT 1"#;
+let log_text = r#"2025-08-12 10:57:09.562 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1"#;
 
-// 将文本拆分为记录并获取前导错误
-let (records, errors) = split_by_ts_records_with_errors(log_text);
-println!("找到 {} 条记录，{} 条前导错误", records.len(), errors.len());
+// 方法 1: 解析为 Record 列表（自动跳过无效行）
+let records = parse_records_from_string(log_text);
+println!("找到 {} 条记录", records.len());
 
-// 解析记录
-for record in records {
-    let parsed = parse_record(record);
-    println!("用户: {}, 事务ID: {}, 执行时间: {:?}ms",
-             parsed.user, parsed.trxid, parsed.execute_time_ms);
+// 方法 2: 解析为 Sqllog 列表（包含成功和失败的）
+let results = parse_sqllogs_from_string(log_text);
+for result in results {
+    match result {
+        Ok(sqllog) => {
+            println!("用户: {}, 事务ID: {}, SQL: {}",
+                sqllog.meta.username, sqllog.meta.trxid, sqllog.body);
+
+            // 获取性能指标（如果有）
+            if let Some(time) = sqllog.execute_time() {
+                println!("执行时间: {:.2}ms", time);
+            }
+        }
+        Err(e) => eprintln!("解析错误: {}", e),
+    }
 }
 ```
 
-### 流式处理（零分配）
+### 流式处理（回调模式）
 
 ```rust
-use dm_database_parser_sqllog::{for_each_record, parse_records_with};
+use dm_database_parser_sqllog::for_each_sqllog_in_string;
 
 let log_text = r#"..."#; // 大量日志文本
 
-// 方法 1: 流式处理记录
-for_each_record(log_text, |rec| {
-    println!("记录: {}", rec.lines().next().unwrap_or(""));
-});
+// 对每个 Sqllog 调用回调函数（适合大数据流式处理）
+let count = for_each_sqllog_in_string(log_text, |sqllog| {
+    println!("EP: {}, 用户: {}, SQL: {}",
+        sqllog.meta.ep, sqllog.meta.username, sqllog.body);
+}).unwrap();
 
-// 方法 2: 流式解析记录
-parse_records_with(log_text, |parsed| {
-    println!("用户: {}, 事务ID: {}", parsed.user, parsed.trxid);
-});
+println!("处理了 {} 条记录", count);
 ```
 
-### 重用缓冲区（避免重复分配）
+
+### 从文件读取
+
+#### 方式一：迭代器模式（推荐用于大文件）
+
+对于大文件（> 100MB），推荐使用迭代器模式，一次只加载一条记录，避免内存溢出：
 
 ```rust
-use dm_database_parser_sqllog::{split_into, parse_into};
+use dm_database_parser_sqllog::{iter_records_from_file, iter_sqllogs_from_file};
 
-let mut records = Vec::new();
-let mut errors = Vec::new();
-let mut parsed_records = Vec::new();
+// 迭代处理原始记录
+let mut record_count = 0;
+let mut error_count = 0;
 
-// 在循环中重用缓冲区
-for log_text in log_files {
-    split_into(log_text, &mut records, &mut errors);
-    parse_into(log_text, &mut parsed_records);
-    // 处理解析结果...
+for result in iter_records_from_file("large_log.sqllog")? {
+    match result {
+        Ok(record) => {
+            record_count += 1;
+            println!("记录 {}: {}", record_count, record.start_line());
+        }
+        Err(e) => {
+            error_count += 1;
+            eprintln!("错误 {}: {}", error_count, e);
+        }
+    }
+}
+
+println!("成功: {}, 失败: {}", record_count, error_count);
+
+// 迭代处理解析后的 SQL 日志（带性能统计）
+let mut total_time = 0.0;
+let mut count = 0;
+let mut slow_queries = 0;
+
+for result in iter_sqllogs_from_file("large_log.sqllog")? {
+    match result {
+        Ok(sqllog) => {
+            if let Some(time) = sqllog.execute_time() {
+                total_time += time;
+                count += 1;
+                if time > 100.0 {
+                    slow_queries += 1;
+                    println!("慢查询: {:.2}ms - {}", time, sqllog.body);
+                }
+            }
+        }
+        Err(e) => eprintln!("解析错误: {}", e),
+    }
+}
+
+println!("平均执行时间: {:.2}ms", total_time / count as f64);
+println!("慢查询数量: {}", slow_queries);
+
+// 使用迭代器组合器（筛选慢查询）
+let slow_queries: Vec<_> = iter_sqllogs_from_file("large_log.sqllog")?
+    .filter_map(Result::ok)  // 忽略解析错误
+    .filter(|log| log.execute_time().map_or(false, |t| t > 100.0))
+    .take(10)  // 只取前 10 条
+    .collect();
+
+println!("找到 {} 条慢查询", slow_queries.len());
+```
+
+#### 方式二：一次性加载（适合小文件）
+
+对于小文件（< 100MB），可以一次性加载所有记录：
+
+```rust
+use dm_database_parser_sqllog::{parse_records_from_file, parse_sqllogs_from_file};
+
+// 一次性加载所有记录（包含成功和失败的）
+let (records, errors) = parse_records_from_file("small_log.sqllog")?;
+println!("成功解析 {} 条记录，遇到 {} 个错误", records.len(), errors.len());
+
+// 一次性加载所有 SQL 日志（包含成功和失败的）
+let (sqllogs, parse_errors) = parse_sqllogs_from_file("small_log.sqllog")?;
+println!("成功解析 {} 条 SQL 日志，遇到 {} 个解析错误", sqllogs.len(), parse_errors.len());
+
+// 处理解析错误
+for error in parse_errors {
+    eprintln!("解析错误: {}", error);
 }
 ```
+
+**API 对比**：
+
+| API | 返回类型 | 内存占用 | 适用场景 |
+|-----|---------|---------|---------|
+| `iter_records_from_file()` | `RecordParser<BufReader<File>>` | 低（流式） | 大文件（> 100MB） |
+| `iter_sqllogs_from_file()` | `SqllogParser<BufReader<File>>` | 低（流式） | 大文件（> 100MB） |
+| `parse_records_from_file()` | `(Vec<Record>, Vec<io::Error>)` | 高（一次性） | 小文件（< 100MB） |
+| `parse_sqllogs_from_file()` | `(Vec<Sqllog>, Vec<ParseError>)` | 高（一次性） | 小文件（< 100MB） |
+
+**选择建议**：
+- ✓ **迭代器模式** (`iter_*`)：一次只处理一条记录，支持 GB 级大文件，可使用 `.filter()`, `.take()` 等组合器
+- ✓ **一次性加载** (`parse_*`)：简单直接，适合需要多次遍历或随机访问的场景
 
 ## 更多示例
 
 查看 `examples/` 目录获取更多使用示例：
 
-- `basic.rs` - 基本使用示例
-- `streaming.rs` - 流式处理示例
-- `reuse_buffers.rs` - 重用缓冲区示例
+- `parse_example.rs` - 基本解析示例
+- `iterator_mode.rs` - 迭代器模式示例（推荐用于大文件）
+- `parse_from_file.rs` - 从文件读取和解析
+- `stream_processing.rs` - 流式处理示例
+- `using_parsers.rs` - 直接使用 RecordParser 和 SqllogParser
+- `error_messages.rs` - 错误处理示例
+- `parse_records.rs` - Record 解析示例
+- `performance_demo.rs` - 性能演示
 
 运行示例：
 
 ```bash
-cargo run --example basic
-cargo run --example streaming
-cargo run --example reuse_buffers
+cargo run --example parse_example
+cargo run --example iterator_mode
+cargo run --example parse_from_file
+cargo run --example stream_processing
 ```
 
 ## API 文档
 
 完整的 API 文档请查看 [docs.rs](https://docs.rs/dm-database-parser-sqllog)。
 
-### 主要类型和函数
+### 主要类型
 
-- [`ParsedRecord`] - 解析后的日志记录结构体
+- [`Sqllog`] - 解析后的 SQL 日志结构体（包含时间戳、元数据、SQL 文本、性能指标等）
+- [`Record`] - 原始日志记录结构（包含起始行和总行数）
 - [`ParseError`] - 解析错误类型
-- [`RecordSplitter`] - 记录切分迭代器
-- [`split_by_ts_records_with_errors`] - 拆分日志为记录和错误
-- [`parse_record`] - 解析单条记录
-- [`for_each_record`] - 流式处理记录
-- [`parse_records_with`] - 流式解析记录
 
-## 性能特性
+### 核心解析器
 
-- **零分配切分**：`RecordSplitter` 和 `for_each_record` 使用引用，不分配新内存
-- **高效匹配**：使用 daachorse 双数组 Aho-Corasick 自动机进行 O(n) 模式匹配
-- **批量处理优化**：提供 `split_into` 和 `parse_into` 以重用缓冲区
+- [`RecordParser`] - 记录解析迭代器，将日志文本按时间戳切分为记录
+- [`SqllogParser`] - SQL 日志解析迭代器，将记录解析为 `Sqllog` 结构体
 
-## 性能测试
+### 字符串解析 API
 
-项目包含完整的基准测试套件，用于验证和监控性能：
+- [`parse_records_from_string`] - 从字符串解析为 `Record` 列表
+- [`parse_sqllogs_from_string`] - 从字符串解析为 `Result<Sqllog, ParseError>` 列表
 
-```bash
-# 运行所有基准测试
-cargo bench
+### 文件解析 API（迭代器模式）
 
-# 运行特定基准测试
-cargo bench --bench parser_bench
-cargo bench --bench performance_test
+- [`iter_records_from_file`] - 从文件读取并返回 `RecordParser` 迭代器（推荐用于大文件）
+- [`iter_sqllogs_from_file`] - 从文件读取并返回 `SqllogParser` 迭代器（推荐用于大文件）
 
-# criterion 默认会生成 HTML 报告
-cargo bench --bench parser_bench
-# 报告保存在 target/criterion/ 目录
-```
+### 文件解析 API（一次性加载）
 
-基准测试包括：
-- 不同大小日志文件的解析性能（10 到 100,000 条记录）
-- 各种 API 的性能对比（`parse_all` vs `for_each_record` vs `parse_records_with`）
-- 内存效率验证（零分配特性）
-- 大型文件处理性能
+- [`parse_records_from_file`] - 从文件读取并返回 `(Vec<Record>, Vec<io::Error>)`
+- [`parse_sqllogs_from_file`] - 从文件读取并返回 `(Vec<Sqllog>, Vec<ParseError>)`
 
-详细的基准测试结果可以在 GitHub Actions 的 artifacts 中查看，或运行 `cargo bench` 后在 `target/criterion/` 目录查看 HTML 报告。
+### 流式处理 API（回调模式）
+
+- [`for_each_sqllog`] - 对每个 `Sqllog` 调用回调函数（接受 `Read` trait）
+- [`for_each_sqllog_in_string`] - 从字符串流式处理 `Sqllog`
+- [`for_each_sqllog_from_file`] - 从文件流式处理 `Sqllog`
 
 ## 设计与注意事项
 
@@ -182,6 +269,36 @@ cargo doc --open
 - SqllogParser: ~4.4 秒
 
 详细性能测试报告请查看：**[docs/PERFORMANCE_BENCHMARK.md](docs/PERFORMANCE_BENCHMARK.md)**
+
+## 测试
+
+本项目包含了全面的测试套件：
+
+- **109 个测试用例**：单元测试 + 集成测试 + 性能回归测试 + 边界情况测试
+- **50+ 个基准场景**：使用 Criterion.rs 进行性能基准测试
+- **100% 通过率**：所有测试当前状态均为通过
+
+### 运行测试
+
+```bash
+# 运行所有测试
+cargo test --all-targets
+
+# 运行性能回归测试（必须使用 release 模式）
+cargo test --test performance_regression --release
+
+# 运行基准测试
+cargo bench
+```
+
+### 测试类型
+
+- **单元测试 (79个)**：测试各个模块的功能
+- **集成测试 (11个)**：端到端场景测试
+- **性能回归测试 (7个)**：确保性能不退化
+- **边界情况测试 (12个)**：测试边界条件和错误处理
+
+详细测试文档请查看：**[docs/TESTING.md](docs/TESTING.md)**
 
 ## 许可证
 
