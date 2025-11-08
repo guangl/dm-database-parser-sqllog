@@ -7,6 +7,7 @@
 //! cargo run --example realtime_watch --features realtime
 //! ```
 
+#[cfg(feature = "realtime")]
 use dm_database_parser_sqllog::realtime::RealtimeSqllogParser;
 use std::env;
 use std::time::Duration;
@@ -14,11 +15,13 @@ use std::time::Duration;
 fn main() {
     // 从命令行参数获取文件路径
     let args: Vec<String> = env::args().collect();
-    
+
     let file_path = if args.len() > 1 {
         &args[1]
     } else {
-        println!("用法: cargo run --example realtime_watch --features realtime <文件路径> [监控秒数]");
+        println!(
+            "用法: cargo run --example realtime_watch --features realtime <文件路径> [监控秒数]"
+        );
         println!("示例: cargo run --example realtime_watch --features realtime sqllog.txt 60");
         println!("\n使用默认值: sqllog.txt");
         "sqllog.txt"
@@ -39,6 +42,7 @@ fn main() {
     println!("🔍 开始监控...");
     println!();
 
+    #[cfg(feature = "realtime")]
     // 创建解析器 - 从当前位置开始（默认从文件末尾）
     let parser = match RealtimeSqllogParser::new(file_path) {
         Ok(p) => p,
@@ -53,8 +57,9 @@ fn main() {
     // let parser = parser.from_beginning().unwrap();
 
     let mut count = 0;
-    
+
     // 启动监控
+    #[cfg(feature = "realtime")]
     let result = parser.watch_for(Duration::from_secs(duration_secs), |sqllog| {
         count += 1;
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -67,14 +72,14 @@ fn main() {
         println!("📦 事务ID:  {}", sqllog.meta.trxid);
         println!("📋 语句ID:  {}", sqllog.meta.stmt_id);
         println!("📱 应用名:  {}", sqllog.meta.appname);
-        
+
         if let Some(ref ip) = sqllog.meta.client_ip {
             println!("🌐 客户端IP: {}", ip);
         }
-        
+
         println!("\n💾 SQL 语句:");
         println!("{}", sqllog.body);
-        
+
         if let Some(ref indicators) = sqllog.indicators {
             println!("\n📊 性能指标:");
             println!("  ⏱️  执行时间: {} ms", indicators.exectime);
@@ -84,6 +89,7 @@ fn main() {
         println!();
     });
 
+    #[cfg(feature = "realtime")]
     match result {
         Ok(_) => {
             println!("\n✅ 监控完成");
