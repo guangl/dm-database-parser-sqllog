@@ -126,95 +126,113 @@ pub fn is_ts_millis_bytes(bytes: &[u8]) -> bool {
 /// ```
 /// 7. meta 部分结束后紧跟一个空格，然后是 body 部分。
 pub fn is_record_start_line(line: &str) -> bool {
+    // 早期退出：检查最小长度
     let bytes = line.as_bytes();
     if bytes.len() < MIN_LINE_LENGTH {
         return false;
     }
 
-    // 检查时间戳部分
+    // 早期退出：验证时间戳格式（最快的失败路径）
     if !is_ts_millis_bytes(&bytes[0..TIMESTAMP_LENGTH]) {
         return false;
     }
 
-    // 检查时间戳后面的空格和括号
+    // 早期退出：检查时间戳后的分隔符 " ("
     if bytes[23] != SPACE_BYTE || bytes[24] != OPEN_PAREN_BYTE {
         return false;
     }
 
-    // 查找并检查 meta 部分的右括号
+    // 早期退出：查找 meta 部分的右括号
     let closing_paren_index = match line.find(CLOSE_PAREN_CHAR) {
-        Some(index) => index,
+        Some(idx) => idx,
         None => return false,
     };
 
-    // 解析并验证 meta 字段 - 使用精确的字段前缀匹配
+    // 提取 meta 部分（括号内的内容）
     let meta_part = &line[META_START_INDEX..closing_paren_index];
 
-    // 验证前 5 个必需字段（EP, sess, thrd, user, trxid）
-    let mut pos = 0;
-    for (i, prefix) in META_FIELD_PREFIXES.iter().take(5).enumerate() {
-        match meta_part[pos..].find(prefix) {
-            Some(idx) if idx == 0 || meta_part.as_bytes()[pos + idx - 1] == SPACE_BYTE => {
-                // 找到字段前缀，跳过这个字段
-                pos += idx + prefix.len();
-                // 找到下一个空格或结束
-                if let Some(next_space) = meta_part[pos..].find(' ') {
-                    pos += next_space + 1; // 跳过空格
-                } else {
-                    // 没有更多空格，这应该是最后一个字段
-                    // 只有处理完所有 5 个字段才能返回 true
-                    return i == 4; // 索引 4 表示第 5 个字段（trxid）
-                }
+    // 验证 meta 字段
+    validate_meta_fields(meta_part)
+}
+
+/// 验证 meta 部分的字段
+///
+/// 字段结构：
+/// - 前5个字段必需：EP[...] sess:... thrd:... user:... trxid:...
+/// - 后3个字段可选：stmt:... appname:... ip:::ffff:...
+///
+/// 字段之间用单个空格分隔
+#[inline]
+fn validate_meta_fields(meta: &str) -> bool {
+    let mut remaining = meta;
+
+    // 验证5个必需字段
+    for &prefix in META_FIELD_PREFIXES.iter().take(5) {
+        // 当前位置必须匹配字段前缀
+        if !remaining.starts_with(prefix) {
+            return false;
+        }
+
+        // 跳过前缀，查找字段值的结束位置（空格或字符串结束）
+        remaining = &remaining[prefix.len()..];
+
+        // 查找下一个空格（字段分隔符）
+        match remaining.find(' ') {
+            Some(space_idx) => {
+                // 跳过字段值和空格，移到下一个字段
+                remaining = &remaining[space_idx + 1..];
             }
-            _ => return false,
+            None => {
+                // 没有更多字段了
+                // 只有在处理完最后一个必需字段（trxid）时才是有效的
+                return prefix == "trxid:";
+            }
         }
     }
 
-    // 到这里至少有 5 个字段，检查第 6 个字段 stmt（可选）
-    if pos >= meta_part.len() {
-        return true; // 恰好 5 个字段
+    // 到这里说明5个必需字段都存在
+    // 检查可选字段：stmt, appname, ip
+
+    // 检查 stmt 字段（可选）
+    if remaining.is_empty() {
+        return true; // 只有5个必需字段，有效
     }
 
-    // 检查是否有 stmt 字段
-    if !meta_part[pos..].starts_with("stmt:") {
-        return false;
+    if !remaining.starts_with("stmt:") {
+        return false; // 如果有更多内容但不是 stmt，则无效
     }
-    pos += 5; // "stmt:" 的长度
 
-    // 跳过 stmt 的值
-    if let Some(next_space) = meta_part[pos..].find(' ') {
-        pos += next_space + 1;
-    } else {
-        // stmt 是最后一个字段（恰好 6 个字段）
+    remaining = &remaining[5..]; // 跳过 "stmt:"
+
+    // 查找 stmt 值的结束位置
+    match remaining.find(' ') {
+        Some(space_idx) => {
+            remaining = &remaining[space_idx + 1..];
+        }
+        None => {
+            return true; // stmt 是最后一个字段，有效
+        }
+    }
+
+    // 检查 appname 字段（可选）
+    if remaining.is_empty() {
+        return true; // 只到 stmt，有效
+    }
+
+    if !remaining.starts_with("appname:") {
+        return false; // 如果有更多内容但不是 appname，则无效
+    }
+
+    remaining = &remaining[8..]; // 跳过 "appname:"
+
+    // appname 的值可能包含空格，需要特殊处理
+    // 查找可能的 ip 字段标记
+    if let Some(_ip_idx) = remaining.find(" ip:::ffff:") {
+        // 有 IP 字段（IP 值后面不应该有更多内容）
         return true;
     }
 
-    // 到这里至少有 6 个字段，检查第 7 个字段 appname（可选）
-    if pos >= meta_part.len() {
-        return true; // 恰好 6 个字段
-    }
-
-    // 检查是否有 appname 字段
-    if pos < meta_part.len() {
-        if let Some(appname_idx) = meta_part[pos..].find("appname:") {
-            if appname_idx == 0 {
-                pos += 8; // "appname:" 的长度
-                // appname 的值可能包含空格，需要找到 ip 前缀或行尾
-                if let Some(ip_idx) = meta_part[pos..].find(" ip:::ffff:") {
-                    // 有 IP 字段
-                    pos += ip_idx + 1; // 移到 "ip:::ffff:" 之前的空格后
-                    pos += 10; // "ip:::ffff:" 的长度
-                    // 应该到达末尾
-                    return pos <= meta_part.len();
-                } else {
-                    // 没有 IP 字段，appname 后面应该直接结束
-                    return true;
-                }
-            }
-        }
-    }
-
-    // 没有 appname 字段，这也是合法的（恰好 6 个字段）
+    // 没有 IP 字段，appname 后面应该直接结束
     true
 }
 
@@ -423,11 +441,15 @@ mod tests {
 
         #[test]
         fn double_space_in_meta() {
-            // 双空格在某些情况下可能被接受，因为我们只检查字段前缀
-            // 这个测试应该验证格式错误的情况
+            // v0.1.3+: 更严格的验证，要求字段之间只有单个空格
+            // 双空格会导致验证失败
             let line = "2025-08-12 10:57:09.548 (EP[0]  sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body";
-            // 实际上这会通过，因为我们只查找字段前缀
-            assert!(is_record_start_line(line));
+            // 新版本中这不会通过，因为我们要求严格的单空格分隔
+            assert!(!is_record_start_line(line));
+
+            // 正确的格式应该是单空格
+            let valid_line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body";
+            assert!(is_record_start_line(valid_line));
         }
     }
 }

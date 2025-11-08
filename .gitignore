@@ -3,3 +3,8 @@
 *.db
 *.sqlite
 sqllogs/
+
+# 覆盖率报告
+lcov.info
+*.profraw
+*.profdata

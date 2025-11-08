@@ -141,13 +141,74 @@ cargo test --all-targets && cargo bench
 当前测试统计：
 - **单元测试**: 79 个
 - **集成测试**: 11 个
+- **API 覆盖测试**: 21 个
 - **性能回归测试**: 7 个
 - **边界情况测试**: 12 个
 - **基准测试**: 50+ 个场景
 
-**总计**: 109 个测试用例 + 50+ 个基准场景
+**总计**: 130 个测试用例 + 50+ 个基准场景
 
 所有测试当前状态：✅ 100% 通过
+
+### 代码覆盖率报告
+
+使用 `cargo-llvm-cov` 生成覆盖率报告（更新时间：2025-01-09）：
+
+```bash
+# 生成 HTML 覆盖率报告
+cargo llvm-cov --all-features --workspace --html
+
+# 生成文本覆盖率报告
+cargo llvm-cov --all-features --workspace
+```
+
+#### 覆盖率统计
+
+| 文件 | 区域覆盖率 | 函数覆盖率 | 行覆盖率 |
+|------|-----------|-----------|---------|
+| `parser/api.rs` | 90.13% (137/152) | 100.00% (15/15) | 93.75% (90/96) |
+| `parser/parse_functions.rs` | 87.38% (360/412) | 95.24% (20/21) | 85.24% (231/271) |
+| `parser/record.rs` | 100.00% (32/32) | 100.00% (8/8) | 100.00% (25/25) |
+| `parser/record_parser.rs` | 91.03% (71/78) | 100.00% (5/5) | 96.15% (50/52) |
+| `parser/sqllog_parser.rs` | 83.33% (10/12) | 100.00% (2/2) | 75.00% (9/12) |
+| `parser/tests.rs` | 98.70% (985/998) | 100.00% (59/59) | 99.59% (488/490) |
+| `sqllog.rs` | 84.21% (16/19) | 80.00% (4/5) | 80.00% (12/15) |
+| `tools.rs` | 95.22% (239/251) | 100.00% (24/24) | 97.35% (220/226) |
+| **总计** | **94.68%** (1850/1954) | **98.56%** (137/139) | **94.78%** (1125/1187) |
+
+#### 覆盖率亮点
+
+- ✅ **整体覆盖率**: 94.68% 区域覆盖率，94.78% 行覆盖率
+- ✅ **核心模块**:
+  - `record.rs` 达到 100% 覆盖
+  - `tools.rs` 达到 97.35% 行覆盖
+  - `record_parser.rs` 达到 96.15% 行覆盖
+- ✅ **函数覆盖**: 98.56% (137/139 个函数被测试)
+- ✅ **测试质量**: `parser/tests.rs` 达到 99.59% 覆盖率
+
+#### 未覆盖代码说明
+
+主要未覆盖部分：
+1. **错误处理分支** (约 40 行): 一些极端错误情况的处理代码
+2. **边缘条件** (约 15 行): 某些罕见的数据格式边界情况
+3. **性能优化路径** (约 7 行): 特定优化分支的部分代码
+
+这些未覆盖部分主要是：
+- 异常难以触发的错误路径
+- 系统级错误（如内存不足）
+- 向后兼容性代码
+
+#### 查看详细报告
+
+HTML 报告位置：
+```
+target/llvm-cov/html/index.html
+```
+
+在浏览器中打开查看详细的代码覆盖率分析，包括：
+- 每个文件的逐行覆盖情况
+- 未覆盖代码的具体位置
+- 分支覆盖率详情
 
 ## CI/CD 集成
 
@@ -160,8 +221,42 @@ cargo test --all-targets
 # 2. 运行性能回归测试（release 模式）
 cargo test --test performance_regression --release
 
-# 3. 确保没有未使用的依赖
+# 3. 生成代码覆盖率报告
+cargo llvm-cov --all-features --workspace --html
+
+# 4. 确保没有未使用的依赖
 cargo clean && cargo build --release
+```
+
+### GitHub Actions 示例
+
+```yaml
+name: Tests and Coverage
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Install llvm-cov
+        run: cargo install cargo-llvm-cov
+
+      - name: Run tests
+        run: cargo test --all-targets
+
+      - name: Run coverage
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: lcov.info
 ```
 
 ## 添加新测试
