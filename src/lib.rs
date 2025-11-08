@@ -36,13 +36,14 @@
 pub mod error;
 pub mod matcher;
 pub mod parser;
+pub mod realtime;
 pub mod sqllog;
 mod tools;
 
 // Re-export commonly used types and functions
 pub use error::ParseError;
 pub use parser::{
-    for_each_record, parse_all, parse_into, parse_record, parse_records_with,
-    split_by_ts_records_with_errors, split_into, ParsedRecord, RecordSplitter,
+    ParsedRecord, RecordSplitter, for_each_record, parse_all, parse_into, parse_record,
+    parse_records_with, split_by_ts_records_with_errors, split_into,
 };
 pub use sqllog::Sqllog;
