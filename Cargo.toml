@@ -1,6 +1,6 @@
 [package]
 name = "dm-database-parser-sqllog"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 authors = ["guangl"]
 description = "一个高性能的达梦数据库 sqllog 日志解析库，提供零分配或低分配的记录切分与解析功能"
@@ -10,7 +10,7 @@ documentation = "https://docs.rs/dm-database-parser-sqllog"
 homepage = "https://github.com/guangl/dm-parser-sqllog"
 keywords = ["sqllog", "parser", "dm-database"]
 categories = ["parsing", "database", "text-processing"]
-exclude = ["tests", "benches", "examples", "target"]
+exclude = ["benches", "docs", "examples", "sqllogs", "target", "tests"]
 
 [lib]
 name = "dm_database_parser_sqllog"
@@ -19,6 +19,11 @@ path = "src/lib.rs"
 [dependencies]
 once_cell = "1.21.3"
 thiserror = "2.0.17"
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

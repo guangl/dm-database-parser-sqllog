@@ -304,7 +304,7 @@ cargo llvm-cov --all-features --workspace
 - **边界情况测试 (12个)**：测试边界条件和错误处理
 - **API 覆盖率测试 (21个)**：确保所有 API 都被测试
 
-详细测试文档请查看：**[docs/TESTING.md](docs/TESTING.md)**  
+详细测试文档请查看：**[docs/TESTING.md](docs/TESTING.md)**
 代码覆盖率报告请查看：**[docs/COVERAGE.md](docs/COVERAGE.md)**
 
 ## 许可证

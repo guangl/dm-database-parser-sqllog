@@ -1,3 +1,7 @@
+//! 工具函数模块
+//!
+//! 提供了日志格式验证相关的工具函数，主要用于快速判断行是否为有效的记录起始行。
+
 use once_cell::sync::Lazy;
 
 // 时间戳格式常量
@@ -38,7 +42,29 @@ const SPACE_BYTE: u8 = b' ';
 const OPEN_PAREN_BYTE: u8 = b'(';
 const CLOSE_PAREN_CHAR: char = ')';
 
-/// 期望输入恰好为 23 字节。
+/// 判断字节数组是否为有效的时间戳格式
+///
+/// 验证时间戳格式是否为 "YYYY-MM-DD HH:MM:SS.mmm"（恰好 23 字节）。
+///
+/// # 参数
+///
+/// * `bytes` - 要检查的字节数组
+///
+/// # 返回
+///
+/// 如果是有效的时间戳格式返回 `true`，否则返回 `false`
+///
+/// # 示例
+///
+/// ```
+/// use dm_database_parser_sqllog::tools::is_ts_millis_bytes;
+///
+/// let valid = b"2025-08-12 10:57:09.548";
+/// assert!(is_ts_millis_bytes(valid));
+///
+/// let invalid = b"2025-08-12";
+/// assert!(!is_ts_millis_bytes(invalid));
+/// ```
 #[inline(always)]
 pub fn is_ts_millis_bytes(bytes: &[u8]) -> bool {
     if bytes.len() != TIMESTAMP_LENGTH {
@@ -62,16 +88,38 @@ pub fn is_ts_millis_bytes(bytes: &[u8]) -> bool {
     true
 }
 
+/// 判断一行日志是否为记录起始行
 ///
-/// 判断一行日志是否为记录起始行。
+/// 这是一个高性能的验证函数，用于快速判断一行文本是否为有效的日志记录起始行。
 ///
-/// 判断标准
-/// 1. 行首 23 字节符合时间戳格式 `YYYY-MM-DD HH:mm:ss.SSS` -> ts
-/// 2. ts 后面紧跟一个空格，然后就是 meta 部分。
-/// 3. meta 是小括号包含起来的。
-/// 4. meta 部分必须包含所有字段（client_ip 可能没有）。
-/// 5. meta 字段间以一个空格分隔。
-/// 6. meta 字段间顺序是固定的。 顺序为 ep -> sess -> thrd_id -> username -> trxid -> statement -> appname -> client_ip (可选)。
+/// # 判断标准
+///
+/// 1. 行首 23 字节符合时间戳格式 `YYYY-MM-DD HH:mm:ss.SSS`
+/// 2. 时间戳后紧跟一个空格，然后是 meta 部分
+/// 3. Meta 部分用小括号包含
+/// 4. Meta 部分必须包含所有必需字段（client_ip 可选）
+/// 5. Meta 字段间以一个空格分隔
+/// 6. Meta 字段顺序固定：ep → sess → thrd_id → username → trxid → statement → appname → client_ip（可选）
+///
+/// # 参数
+///
+/// * `line` - 要检查的行
+///
+/// # 返回
+///
+/// 如果是有效的记录起始行返回 `true`，否则返回 `false`
+///
+/// # 示例
+///
+/// ```
+/// use dm_database_parser_sqllog::tools::is_record_start_line;
+///
+/// let valid = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1";
+/// assert!(is_record_start_line(valid));
+///
+/// let invalid = "This is not a log line";
+/// assert!(!is_record_start_line(invalid));
+/// ```
 /// 7. meta 部分结束后紧跟一个空格，然后是 body 部分。
 pub fn is_record_start_line(line: &str) -> bool {
     let bytes = line.as_bytes();
