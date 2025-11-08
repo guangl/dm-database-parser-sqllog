@@ -470,29 +470,16 @@ fn parse_digits_forward(s: &str, mut i: usize) -> Option<(u64, usize)> {
     Some((val, i))
 }
 
-/// 将记录分割成四个部分：ts（时间戳）、meta（元信息）、body（SQL体）、end（指标）
-/// 
-/// 规则：
-/// 1. ts 和 meta 必定在首行
-/// 2. body 可能跨多行
-/// 3. end 可能不存在
-/// 4. end 必定在最后一行（如果存在），紧跟在 body 之后
-/// 5. 指标信息（EXECTIME、ROWCOUNT、EXEC_ID）只在 end 中提取
+// 辅助：将记录分割成 (ts, meta_raw, body)，均为 &str（借用）
 fn split_ts_meta_body<'a>(rec: &'a str) -> (&'a str, &'a str, &'a str) {
-    // 1. 提取 ts（时间戳，固定 23 字符）
     let ts: &'a str = if rec.len() >= 23 { &rec[..23] } else { "" };
     let after_ts: &'a str = if rec.len() > 23 { &rec[23..] } else { "" };
-    
     let mut meta_raw: &'a str = "";
     let mut body: &'a str = "";
 
-    // 2. 提取 meta（元信息在括号内）
     if let Some(open_idx) = after_ts.find('(') {
         if let Some(close_rel) = after_ts[open_idx..].find(')') {
-            // meta 在括号内
             meta_raw = &after_ts[open_idx + 1..open_idx + close_rel];
-            
-            // body 从括号之后开始
             let body_start = 23 + open_idx + close_rel + 1;
             if body_start < rec.len() {
                 body = rec[body_start..].trim_start();
@@ -578,27 +565,15 @@ fn parse_meta(meta_raw: &str) -> MetaParts<'_> {
     parts
 }
 
-/// 从记录的 end 部分提取指标信息（EXECTIME、ROWCOUNT、EXEC_ID）
-/// 
-/// end 部分特征：
-/// 1. 必定在最后一行（如果存在）
-/// 2. 紧跟在 body 之后，格式如：EXECTIME: 15ms ROWCOUNT: 1 EXEC_ID: 1001
-/// 3. end 可能不存在
-/// 4. 指标的顺序是固定的：EXECTIME -> ROWCOUNT -> EXEC_ID
-/// 
-/// 返回：(execute_time_ms, row_count, execute_id)
+// 辅助：从 body 末尾反向提取数值指标（EXEC_ID, ROWCOUNT, EXECTIME）
 fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
     let mut execute_id: Option<u64> = None;
     let mut row_count: Option<u64> = None;
     let mut execute_time_ms: Option<u64> = None;
 
-    // 从最后一行反向查找指标
-    // 因为 end 必定在最后一行，所以我们从后往前搜索
-    
     let body_str = body;
     let mut search_end = body_str.len();
 
-    // 反向查找 EXEC_ID（最后一个指标）
     if let Some(pos) = body_str[..search_end].rfind("EXEC_ID:") {
         let start = pos + "EXEC_ID:".len();
         if let Some((v, _)) = parse_digits_forward(body_str, start) {
@@ -607,7 +582,6 @@ fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
         search_end = pos;
     }
 
-    // 反向查找 ROWCOUNT（中间指标）
     if let Some(pos) = body_str[..search_end].rfind("ROWCOUNT:") {
         let start = pos + "ROWCOUNT:".len();
         if let Some((v, _)) = parse_digits_forward(body_str, start) {
@@ -616,7 +590,6 @@ fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
         search_end = pos;
     }
 
-    // 反向查找 EXECTIME（第一个指标）
     if let Some(pos) = body_str[..search_end].rfind("EXECTIME:") {
         let start = pos + "EXECTIME:".len();
         if let Some((v, _)) = parse_digits_forward(body_str, start) {
@@ -631,14 +604,6 @@ fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
 ///
 /// 该函数将一条日志记录文本解析为 `ParsedRecord` 结构体。
 /// 返回的结构体中的所有字符串字段都是对输入文本的引用，不会产生额外的内存分配。
-///
-/// # 记录结构
-///
-/// 每条记录由四个部分组成：
-/// 1. **ts** (时间戳) - 必定在首行，固定 23 字符，格式：YYYY-MM-DD HH:MM:SS.mmm
-/// 2. **meta** (元信息) - 必定在首行，括号内，包含 EP、sess、thrd、user、trxid、stmt、appname 等
-/// 3. **body** (SQL语句体) - 可能跨多行，包含实际的 SQL 语句
-/// 4. **end** (指标信息) - 可选，必定在最后一行（如果存在），包含 EXECTIME、ROWCOUNT、EXEC_ID
 ///
 /// # 参数
 ///
@@ -659,18 +624,12 @@ fn parse_body_metrics(body: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
 /// ```
 pub fn parse_record(rec: &'_ str) -> ParsedRecord<'_> {
     // 1) 将记录分割为 ts / meta_raw / body
-    //    - ts: 时间戳（首行，23字符）
-    //    - meta_raw: 元信息（首行，括号内）
-    //    - body: SQL语句体（可能多行）+ end指标（最后一行，可选）
     let (ts, meta_raw, body) = split_ts_meta_body(rec);
 
     // 2) 解析 meta 字段
     let meta = parse_meta(meta_raw);
 
-    // 3) 从 body 的 end 部分解析数值指标
-    //    - EXECTIME: 执行时间（毫秒）
-    //    - ROWCOUNT: 影响行数
-    //    - EXEC_ID: 执行ID
+    // 3) 从 body 解析数值指标
     let (execute_time_ms, row_count, execute_id) = parse_body_metrics(body);
 
     ParsedRecord {

@@ -30,13 +30,17 @@
 //! ## 模块组织
 //!
 //! - [`parser`] - 核心解析功能，包括记录切分和解析
+//! - [`parser_config`] - 可扩展的解析器配置（新）
+//! - [`record_types`] - Record 数据结构定义（新）
 //! - [`error`] - 错误类型定义
 //! - [`sqllog`] - Sqllog 结构体定义
 
 pub mod error;
 pub mod matcher;
 pub mod parser;
+pub mod parser_config;
 pub mod realtime;
+pub mod record_types;
 pub mod sqllog;
 mod tools;
 
