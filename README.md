@@ -3,6 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/dm-database-parser-sqllog.svg)](https://crates.io/crates/dm-database-parser-sqllog)
 [![Documentation](https://docs.rs/dm-database-parser-sqllog/badge.svg)](https://docs.rs/dm-database-parser-sqllog)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Coverage](https://img.shields.io/badge/coverage-98.47%25-brightgreen.svg)](docs/COVERAGE.md)
 
 一个高性能的达梦数据库 sqllog 日志解析库，提供零分配或低分配的记录切分与解析功能。
 
@@ -274,9 +275,10 @@ cargo doc --open
 
 本项目包含了全面的测试套件：
 
-- **109 个测试用例**：单元测试 + 集成测试 + 性能回归测试 + 边界情况测试
+- **130 个测试用例**：单元测试 + 集成测试 + 性能回归测试 + 边界情况测试 + API 覆盖率测试
 - **50+ 个基准场景**：使用 Criterion.rs 进行性能基准测试
 - **100% 通过率**：所有测试当前状态均为通过
+- **98.47% 代码覆盖率**：远超 80% 的行业标准
 
 ### 运行测试
 
@@ -289,6 +291,9 @@ cargo test --test performance_regression --release
 
 # 运行基准测试
 cargo bench
+
+# 生成覆盖率报告
+cargo llvm-cov --all-features --workspace
 ```
 
 ### 测试类型
@@ -297,8 +302,10 @@ cargo bench
 - **集成测试 (11个)**：端到端场景测试
 - **性能回归测试 (7个)**：确保性能不退化
 - **边界情况测试 (12个)**：测试边界条件和错误处理
+- **API 覆盖率测试 (21个)**：确保所有 API 都被测试
 
-详细测试文档请查看：**[docs/TESTING.md](docs/TESTING.md)**
+详细测试文档请查看：**[docs/TESTING.md](docs/TESTING.md)**  
+代码覆盖率报告请查看：**[docs/COVERAGE.md](docs/COVERAGE.md)**
 
 ## 许可证
 
