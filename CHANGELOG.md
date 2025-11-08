@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-01-24
+
+### Added
+
+- **实时监控功能**：全新的 `realtime` 特性，支持实时监控 SQL 日志文件变化
+  - `RealtimeSqllogParser` - 核心实时监控解析器
+  - `watch()` - 持续监控日志文件，自动捕获新增记录
+  - `watch_for()` - 监控指定时长后自动停止
+  - `from_beginning()` - 从文件开头开始处理所有记录
+  - 自动处理文件轮转、截断等场景
+  - 精确的文件位置跟踪和断点续传支持
+  - 完善的错误处理和恢复机制
+
+- **新增依赖**：
+  - `notify = "8.2"` - 跨平台文件系统监控（可选特性）
+  
+- **示例代码**：
+  - `examples/realtime_watch.rs` - 实时监控示例
+
+- **测试覆盖**：
+  - 新增 108 个实时监控专项测试
+  - 测试总数从 130 增加到 268
+  - 实时监控模块代码覆盖率: 91.17% (行覆盖)
+
+### Changed
+
+- 整体代码覆盖率从 98.47% 调整至 94.07%（由于新增大量实时监控代码）
+- 更新项目描述，强调实时监控能力
+- 更新 README.md，新增实时监控使用说明
+- 更新 Cargo.toml 版本至 0.3.0
+
+### Documentation
+
+- 新增 REALTIME_FEATURE.md 详细文档
+- 更新 README.md 安装说明，包含 realtime 特性的启用方式
+- 更新相关链接，添加实时监控特性文档
+
 ## [Unreleased]
 
 ### Changed

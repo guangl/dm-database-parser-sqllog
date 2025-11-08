@@ -3,16 +3,17 @@
 [![Crates.io](https://img.shields.io/crates/v/dm-database-parser-sqllog.svg)](https://crates.io/crates/dm-database-parser-sqllog)
 [![Documentation](https://docs.rs/dm-database-parser-sqllog/badge.svg)](https://docs.rs/dm-database-parser-sqllog)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-98.47%25-brightgreen.svg)](docs/COVERAGE.md)
+[![Coverage](https://img.shields.io/badge/coverage-94.07%25-brightgreen.svg)](docs/COVERAGE.md)
 
-一个高性能的达梦数据库 sqllog 日志解析库，提供零分配或低分配的记录切分与解析功能。
+一个高性能的达梦数据库 sqllog 日志解析库，提供零分配或低分配的记录切分与解析功能，以及实时日志监控能力。
 
 ## 主要特点
 
 - **零分配解析**：基于时间戳的记录切分，使用流式 API 避免额外内存分配
+- **实时监控**：支持实时监控 SQL 日志文件变化，增量解析新增内容（v0.3.0+）
 - **高效模式匹配**：使用双数组 Aho-Corasick（daachorse）进行高效模式匹配
 - **轻量级结构**：解析结果使用引用（`&str`），避免不必要的字符串复制
-- **灵活的 API**：提供批量解析、流式解析等多种使用方式
+- **灵活的 API**：提供批量解析、流式解析、实时监控等多种使用方式
 - **详细的错误信息**：所有解析错误都包含原始数据，便于调试和问题定位
 - **高性能**：适合在高吞吐日志处理场景中使用
 
@@ -22,7 +23,10 @@
 
 ```toml
 [dependencies]
-dm-database-parser-sqllog = "0.1"
+dm-database-parser-sqllog = "0.3"
+
+# 如果需要实时监控功能，启用 realtime 特性
+dm-database-parser-sqllog = { version = "0.3", features = ["realtime"] }
 ```
 
 ## 快速开始
@@ -135,6 +139,54 @@ let slow_queries: Vec<_> = iter_sqllogs_from_file("large_log.sqllog")?
     .collect();
 
 println!("找到 {} 条慢查询", slow_queries.len());
+```
+
+### 实时监控日志文件（v0.3.0+）
+
+使用 `realtime` 特性可以实时监控 SQL 日志文件的变化：
+
+```rust
+use dm_database_parser_sqllog::realtime::RealtimeSqllogParser;
+use std::time::Duration;
+
+// 从文件末尾开始监控新增日志
+let parser = RealtimeSqllogParser::new("sqllog.txt")?;
+parser.watch(|sqllog| {
+    println!("[{}] 用户: {}, SQL: {}", 
+        sqllog.ts, sqllog.meta.username, sqllog.body);
+    
+    // 检测慢查询
+    if let Some(time) = sqllog.execute_time() {
+        if time > 1000.0 {
+            eprintln!("⚠️  慢查询告警: {:.2}ms", time);
+        }
+    }
+})?;
+
+// 监控指定时长后停止
+let parser = RealtimeSqllogParser::new("sqllog.txt")?;
+parser.watch_for(Duration::from_secs(60), |sqllog| {
+    // 处理日志...
+})?;
+
+// 从文件开头开始解析
+let parser = RealtimeSqllogParser::new("sqllog.txt")?
+    .from_beginning()?;
+parser.watch(|sqllog| {
+    // 处理所有历史日志...
+})?;
+```
+
+详细文档请查看：**[REALTIME_FEATURE.md](REALTIME_FEATURE.md)**
+
+#### 方式二：一次性加载（适合小文件）
+
+对于小文件（< 100MB），可以一次性加载所有记录：
+
+```rust
+use dm_database_parser_sqllog::{parse_records_from_file, parse_sqllogs_from_file};
+
+````
 ```
 
 #### 方式二：一次性加载（适合小文件）
@@ -321,16 +373,16 @@ cargo doc --open
 
 本项目包含了全面的测试套件：
 
-- **130 个测试用例**：单元测试 + 集成测试 + 性能回归测试 + 边界情况测试 + API 覆盖率测试
+- **268 个测试用例**：包括 108 个实时监控专项测试
 - **50+ 个基准场景**：使用 Criterion.rs 进行性能基准测试
 - **100% 通过率**：所有测试当前状态均为通过
-- **98.47% 代码覆盖率**：远超 80% 的行业标准
+- **94.07% 代码覆盖率**：整体覆盖率，实时监控模块达 91.17%
 
 ### 运行测试
 
 ```bash
 # 运行所有测试
-cargo test --all-targets
+cargo test --all-targets --all-features
 
 # 运行性能回归测试（必须使用 release 模式）
 cargo test --test performance_regression --release
@@ -339,19 +391,16 @@ cargo test --test performance_regression --release
 cargo bench
 
 # 生成覆盖率报告
-cargo llvm-cov --all-features --workspace
+cargo llvm-cov --all-features --workspace --html
+# 报告位于: target/llvm-cov/html/index.html
 ```
 
-### 测试类型
+### 测试分布
 
-- **单元测试 (79个)**：测试各个模块的功能
-- **集成测试 (11个)**：端到端场景测试
-- **性能回归测试 (7个)**：确保性能不退化
-- **边界情况测试 (12个)**：测试边界条件和错误处理
-- **API 覆盖率测试 (21个)**：确保所有 API 都被测试
+- **核心解析器测试 (160个)**：测试各个模块的功能
+- **实时监控测试 (108个)**：全面测试实时监控能力，包括文件监控、位置跟踪、错误处理等
 
 详细测试文档请查看：**[docs/TESTING.md](docs/TESTING.md)**
-代码覆盖率报告请查看：**[docs/COVERAGE.md](docs/COVERAGE.md)**
 
 ## 许可证
 
@@ -364,3 +413,5 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 - [文档](https://docs.rs/dm-database-parser-sqllog)
 - [GitHub](https://github.com/guangl/dm-parser-sqllog)
 - [性能测试报告](docs/PERFORMANCE_BENCHMARK.md)
+- [实时监控特性文档](REALTIME_FEATURE.md)
+
