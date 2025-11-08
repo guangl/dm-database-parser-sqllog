@@ -33,11 +33,11 @@ loop {
     let count = parser.parse_new_records(|parsed| {
         // 处理新记录
     })?;
-    
+
     if count > 0 {
         println!("处理了 {} 条新记录", count);
     }
-    
+
     std::thread::sleep(Duration::from_secs(5));
 }
 ```
