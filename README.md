@@ -141,44 +141,6 @@ let slow_queries: Vec<_> = iter_sqllogs_from_file("large_log.sqllog")?
 println!("找到 {} 条慢查询", slow_queries.len());
 ```
 
-### 实时监控日志文件（v0.3.0+）
-
-使用 `realtime` 特性可以实时监控 SQL 日志文件的变化：
-
-```rust
-use dm_database_parser_sqllog::realtime::RealtimeSqllogParser;
-use std::time::Duration;
-
-// 从文件末尾开始监控新增日志
-let parser = RealtimeSqllogParser::new("sqllog.txt")?;
-parser.watch(|sqllog| {
-    println!("[{}] 用户: {}, SQL: {}",
-        sqllog.ts, sqllog.meta.username, sqllog.body);
-
-    // 检测慢查询
-    if let Some(time) = sqllog.execute_time() {
-        if time > 1000.0 {
-            eprintln!("⚠️  慢查询告警: {:.2}ms", time);
-        }
-    }
-})?;
-
-// 监控指定时长后停止
-let parser = RealtimeSqllogParser::new("sqllog.txt")?;
-parser.watch_for(Duration::from_secs(60), |sqllog| {
-    // 处理日志...
-})?;
-
-// 从文件开头开始解析
-let parser = RealtimeSqllogParser::new("sqllog.txt")?
-    .from_beginning()?;
-parser.watch(|sqllog| {
-    // 处理所有历史日志...
-})?;
-```
-
-详细文档请查看：**[REALTIME_FEATURE.md](REALTIME_FEATURE.md)**
-
 #### 方式二：一次性加载（适合小文件）
 
 对于小文件（< 100MB），可以一次性加载所有记录：
@@ -253,6 +215,45 @@ invalid EP format: EPX0] | raw: EPX0] sess:123 thrd:456 user:alice trxid:0 stmt:
 ```
 
 这使得在生产环境中快速定位问题变得更加容易。
+
+
+### 实时监控日志文件（v0.3.0+）
+
+使用 `realtime` 特性可以实时监控 SQL 日志文件的变化：
+
+```rust
+use dm_database_parser_sqllog::realtime::RealtimeSqllogParser;
+use std::time::Duration;
+
+// 从文件末尾开始监控新增日志
+let parser = RealtimeSqllogParser::new("sqllog.txt")?;
+parser.watch(|sqllog| {
+    println!("[{}] 用户: {}, SQL: {}",
+        sqllog.ts, sqllog.meta.username, sqllog.body);
+
+    // 检测慢查询
+    if let Some(time) = sqllog.execute_time() {
+        if time > 1000.0 {
+            eprintln!("⚠️  慢查询告警: {:.2}ms", time);
+        }
+    }
+})?;
+
+// 监控指定时长后停止
+let parser = RealtimeSqllogParser::new("sqllog.txt")?;
+parser.watch_for(Duration::from_secs(60), |sqllog| {
+    // 处理日志...
+})?;
+
+// 从文件开头开始解析
+let parser = RealtimeSqllogParser::new("sqllog.txt")?
+    .from_beginning()?;
+parser.watch(|sqllog| {
+    // 处理所有历史日志...
+})?;
+```
+
+详细文档请查看：**[REALTIME_FEATURE.md](REALTIME_FEATURE.md)**
 
 
 **API 对比**：
