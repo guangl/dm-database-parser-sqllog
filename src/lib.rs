@@ -11,7 +11,7 @@
 //!
 //! ## 快速开始
 //!
-//! ### 从文件迭代处理 Records（推荐）
+//! ### 从文件迭代处理 Sqllogs（推荐）
 //!
 //! ```rust,no_run
 //! use dm_database_parser_sqllog::iter_records_from_file;
@@ -19,39 +19,32 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! for result in iter_records_from_file("sqllog.txt")? {
 //!     match result {
-//!         Ok(record) => {
-//!             // 进一步解析为 Sqllog
-//!             match record.parse_to_sqllog() {
-//!                 Ok(sqllog) => {
-//!                     println!("时间戳: {}", sqllog.ts);
-//!                     println!("用户: {}", sqllog.meta.username);
-//!                     println!("SQL: {}", sqllog.body);
-//!                 }
-//!                 Err(e) => eprintln!("解析错误: {}", e),
-//!             }
+//!         Ok(sqllog) => {
+//!             println!("时间戳: {}", sqllog.ts);
+//!             println!("用户: {}", sqllog.meta.username);
+//!             println!("SQL: {}", sqllog.body);
 //!         }
-//!         Err(e) => eprintln!("IO 错误: {}", e),
+//!         Err(e) => eprintln!("解析错误: {}", e),
 //!     }
 //! }
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! ### 从文件批量加载 Records
+//! ### 从文件批量加载并解析为 Sqllog（自动并行处理）
 //!
 //! ```rust,no_run
 //! use dm_database_parser_sqllog::parse_records_from_file;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let (records, errors) = parse_records_from_file("sqllog.txt")?;
-//! println!("成功解析 {} 条记录", records.len());
+//! // parse_records_from_file 现在直接返回 Vec<Sqllog>，内部自动使用并行处理
+//! let (sqllogs, errors) = parse_records_from_file("sqllog.txt")?;
+//! println!("成功解析 {} 条 SQL 日志", sqllogs.len());
 //! println!("遇到 {} 个错误", errors.len());
 //!
-//! // 进一步解析为 Sqllog
-//! for record in records {
-//!     if let Ok(sqllog) = record.parse_to_sqllog() {
-//!         println!("SQL: {}", sqllog.body);
-//!     }
+//! // 直接使用解析好的 Sqllog
+//! for sqllog in sqllogs {
+//!     println!("用户: {}, SQL: {}", sqllog.meta.username, sqllog.body);
 //! }
 //! # Ok(())
 //! # }
@@ -88,5 +81,11 @@ pub use sqllog::Sqllog;
 // 核心解析器类型
 pub use parser::{Record, RecordParser};
 
-// Record 文件解析 API（推荐使用）
+// 文件解析 API
 pub use parser::{iter_records_from_file, parse_records_from_file};
+
+// 测试辅助 API - 仅供测试使用
+#[doc(hidden)]
+pub mod __test_helpers {
+    pub use crate::parser::parse_functions::*;
+}

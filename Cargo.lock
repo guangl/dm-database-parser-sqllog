@@ -205,8 +205,10 @@ name = "dm-database-parser-sqllog"
 version = "0.3.0"
 dependencies = [
  "criterion",
+ "memchr",
  "notify",
  "once_cell",
+ "rayon",
  "rusqlite",
  "serde",
  "tempfile",

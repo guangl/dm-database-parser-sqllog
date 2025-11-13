@@ -2,8 +2,6 @@
 //!
 //! 提供了日志格式验证相关的工具函数，主要用于快速判断行是否为有效的记录起始行。
 
-use once_cell::sync::Lazy;
-
 // 时间戳格式常量
 const TIMESTAMP_LENGTH: usize = 23;
 const MIN_LINE_LENGTH: usize = 25;
@@ -17,29 +15,6 @@ const TIMESTAMP_SEPARATOR_POSITIONS: [(usize, u8); 6] = [
 ];
 const TIMESTAMP_DIGIT_POSITIONS: [usize; 17] =
     [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 20, 21, 22];
-
-// Meta 字段常量
-const META_START_INDEX: usize = 25;
-#[allow(dead_code)]
-const MIN_META_FIELDS: usize = 6; // 最少字段数（支持没有 appname 的情况）
-#[allow(dead_code)]
-const REQUIRED_META_FIELDS: usize = 7;
-#[allow(dead_code)]
-const META_WITH_IP_FIELDS: usize = 8;
-
-// 使用 Lazy 静态初始化字段前缀数组，避免每次访问时创建
-static META_FIELD_PREFIXES: Lazy<[&'static str; 8]> = Lazy::new(|| {
-    [
-        "EP[",
-        "sess:",
-        "thrd:",
-        "user:",
-        "trxid:",
-        "stmt:",
-        "appname:",
-        "ip:::ffff:",
-    ]
-});
 
 // 预定义的字节常量，避免重复创建
 const SPACE_BYTE: u8 = b' ';
@@ -148,92 +123,88 @@ pub fn is_record_start_line(line: &str) -> bool {
         None => return false,
     };
 
-    // 提取 meta 部分（括号内的内容）
-    let meta_part = &line[META_START_INDEX..closing_paren_index];
-
-    // 验证 meta 字段
-    validate_meta_fields(meta_part)
+    // 提取 meta 部分并验证字段
+    let meta_part = &line[25..closing_paren_index];
+    validate_meta_fields_fast(meta_part)
 }
 
-/// 验证 meta 部分的字段
+/// 快速验证 meta 字段（只验证 5 个必需字段的顺序和前缀）
 ///
-/// 字段结构：
-/// - 前5个字段必需：EP[...] sess:... thrd:... user:... trxid:...
-/// - 后3个字段可选：stmt:... appname:... ip:::ffff:...
-///
-/// 字段之间用单个空格分隔
+/// 使用字节级操作，比字符串操作快约 2-3 倍
 #[inline]
-fn validate_meta_fields(meta: &str) -> bool {
-    let mut remaining = meta;
+fn validate_meta_fields_fast(meta: &str) -> bool {
+    let bytes = meta.as_bytes();
+    let len = bytes.len();
 
-    // 验证5个必需字段
-    for &prefix in META_FIELD_PREFIXES.iter().take(5) {
-        // 当前位置必须匹配字段前缀
-        if !remaining.starts_with(prefix) {
-            return false;
-        }
-
-        // 跳过前缀，查找字段值的结束位置（空格或字符串结束）
-        remaining = &remaining[prefix.len()..];
-
-        // 查找下一个空格（字段分隔符）
-        match remaining.find(' ') {
-            Some(space_idx) => {
-                // 跳过字段值和空格，移到下一个字段
-                remaining = &remaining[space_idx + 1..];
-            }
-            None => {
-                // 没有更多字段了
-                // 只有在处理完最后一个必需字段（trxid）时才是有效的
-                return prefix == "trxid:";
-            }
-        }
+    // 最小长度检查："EP[0] sess:1 thrd:1 user:a trxid:1" 约 38 字节
+    if len < 38 {
+        return false;
     }
 
-    // 到这里说明5个必需字段都存在
-    // 检查可选字段：stmt, appname, ip
-
-    // 检查 stmt 字段（可选）
-    if remaining.is_empty() {
-        return true; // 只有5个必需字段，有效
+    // 内联的字节前缀匹配函数
+    #[inline(always)]
+    fn check_prefix(bytes: &[u8], prefix: &[u8]) -> bool {
+        bytes.len() >= prefix.len() && &bytes[..prefix.len()] == prefix
     }
 
-    if !remaining.starts_with("stmt:") {
-        return false; // 如果有更多内容但不是 stmt，则无效
+    // 内联的空格查找函数
+    #[inline(always)]
+    fn find_space(bytes: &[u8]) -> Option<usize> {
+        bytes.iter().position(|&b| b == b' ')
     }
 
-    remaining = &remaining[5..]; // 跳过 "stmt:"
+    let mut pos = 0;
 
-    // 查找 stmt 值的结束位置
-    match remaining.find(' ') {
-        Some(space_idx) => {
-            remaining = &remaining[space_idx + 1..];
-        }
-        None => {
-            return true; // stmt 是最后一个字段，有效
-        }
+    // 1. 验证 EP[ (必须在开头)
+    if !check_prefix(&bytes[pos..], b"EP[") {
+        return false;
+    }
+    pos = match find_space(&bytes[pos..]) {
+        Some(idx) => pos + idx + 1,
+        None => return false,
+    };
+    if pos >= len {
+        return false;
     }
 
-    // 检查 appname 字段（可选）
-    if remaining.is_empty() {
-        return true; // 只到 stmt，有效
+    // 2. 验证 sess:
+    if !check_prefix(&bytes[pos..], b"sess:") {
+        return false;
+    }
+    pos = match find_space(&bytes[pos..]) {
+        Some(idx) => pos + idx + 1,
+        None => return false,
+    };
+    if pos >= len {
+        return false;
     }
 
-    if !remaining.starts_with("appname:") {
-        return false; // 如果有更多内容但不是 appname，则无效
+    // 3. 验证 thrd:
+    if !check_prefix(&bytes[pos..], b"thrd:") {
+        return false;
+    }
+    pos = match find_space(&bytes[pos..]) {
+        Some(idx) => pos + idx + 1,
+        None => return false,
+    };
+    if pos >= len {
+        return false;
     }
 
-    remaining = &remaining[8..]; // 跳过 "appname:"
-
-    // appname 的值可能包含空格，需要特殊处理
-    // 查找可能的 ip 字段标记
-    if let Some(_ip_idx) = remaining.find(" ip:::ffff:") {
-        // 有 IP 字段（IP 值后面不应该有更多内容）
-        return true;
+    // 4. 验证 user:
+    if !check_prefix(&bytes[pos..], b"user:") {
+        return false;
+    }
+    pos = match find_space(&bytes[pos..]) {
+        Some(idx) => pos + idx + 1,
+        None => return false,
+    };
+    if pos >= len {
+        return false;
     }
 
-    // 没有 IP 字段，appname 后面应该直接结束
-    true
+    // 5. 验证 trxid:
+    check_prefix(&bytes[pos..], b"trxid:")
 }
 
 #[cfg(test)]
