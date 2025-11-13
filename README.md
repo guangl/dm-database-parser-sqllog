@@ -342,10 +342,11 @@ cargo build
 # 运行测试
 cargo test
 
-# 运行性能测试
-cargo bench
+# 运行 API 性能测试
+cargo bench --bench api_bench
 
 # 查看性能报告
+# API 性能测试报告：docs/BENCHMARK_API.md
 # 详细的性能测试报告：docs/PERFORMANCE_BENCHMARK.md
 # HTML 报告：target/criterion/report/index.html
 
@@ -357,6 +358,22 @@ cargo doc --open
 ```
 
 ## 性能
+
+### API 性能对比
+
+对外公开的主要 API 性能对比（使用真实日志文件测试）：
+
+| API | 平均时间 | 适用场景 |
+|-----|---------|---------|
+| `RecordParser` | 259.85 ms | 直接使用，性能最佳 |
+| `parse_records_from_file` | 275.81 ms | 批量读取，代码简洁 |
+| `iter_records_from_file` | 358.52 ms | 流式处理，内存友好 |
+
+*测试文件: dmsql_DSC0_20250812_092516.log，包含完整的 Record 分割 + Sqllog 解析*
+
+详细的 API 性能测试报告请查看：**[docs/BENCHMARK_API.md](docs/BENCHMARK_API.md)**
+
+### 底层解析性能
 
 - **RecordParser**: 467 MiB/s 吞吐量，每秒处理约 310 万条记录
 - **SqllogParser**: 130 MiB/s 吞吐量，每秒处理约 91 万条记录

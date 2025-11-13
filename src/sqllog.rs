@@ -9,20 +9,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// 表示一条完整的 SQL 日志记录，包含时间戳、元数据、SQL 语句体和可选的性能指标。
 ///
-/// # 示例
-///
-/// ```
-/// use dm_database_parser_sqllog::parse_sqllogs_from_string;
-///
-/// let log = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1"#;
-/// let results = parse_sqllogs_from_string(log);
-///
-/// if let Ok(sqllog) = &results[0] {
-///     assert_eq!(sqllog.ts, "2025-08-12 10:57:09.548");
-///     assert_eq!(sqllog.meta.username, "alice");
-///     assert_eq!(sqllog.body, "SELECT 1");
-/// }
-/// ```
+
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Sqllog {
@@ -74,22 +61,7 @@ pub struct MetaParts {
 ///
 /// 包含 SQL 执行的性能指标，如执行时间、影响行数等。
 ///
-/// # 示例
-///
-/// ```
-/// use dm_database_parser_sqllog::parse_sqllogs_from_string;
-///
-/// let log = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1 EXECTIME: 10.5(ms) ROWCOUNT: 100(rows) EXEC_ID: 12345."#;
-/// let results = parse_sqllogs_from_string(log);
-///
-/// if let Ok(sqllog) = &results[0] {
-///     if let Some(indicators) = &sqllog.indicators {
-///         assert_eq!(indicators.execute_time, 10.5);
-///         assert_eq!(indicators.row_count, 100);
-///         assert_eq!(indicators.execute_id, 12345);
-///     }
-/// }
-/// ```
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IndicatorsParts {

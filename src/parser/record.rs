@@ -10,20 +10,7 @@ use crate::sqllog::Sqllog;
 /// 日志记录由一个起始行和零个或多个继续行组成。起始行包含时间戳和元数据，
 /// 继续行包含多行 SQL 语句的后续部分。
 ///
-/// # 示例
-///
-/// ```
-/// use dm_database_parser_sqllog::{Record, parse_records_from_string};
-///
-/// let log = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT *
-/// FROM users
-/// WHERE id = 1"#;
-///
-/// let records = parse_records_from_string(log);
-/// assert_eq!(records.len(), 1);
-/// assert!(records[0].has_continuation_lines());
-/// assert_eq!(records[0].lines.len(), 3);
-/// ```
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Record {
     /// 记录的所有行（第一行是起始行，后续行是继续行）
@@ -93,18 +80,6 @@ impl Record {
     ///
     /// * `Ok(Sqllog)` - 解析成功
     /// * `Err(ParseError)` - 解析失败
-    ///
-    /// # 示例
-    ///
-    /// ```
-    /// use dm_database_parser_sqllog::{Record, parse_records_from_string};
-    ///
-    /// let log = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1";
-    /// let records = parse_records_from_string(log);
-    /// let sqllog = records[0].parse_to_sqllog().unwrap();
-    ///
-    /// assert_eq!(sqllog.meta.username, "alice");
-    /// ```
     pub fn parse_to_sqllog(&self) -> Result<Sqllog, ParseError> {
         let lines: Vec<&str> = self.lines.iter().map(|s| s.as_str()).collect();
         super::parse_functions::parse_record(&lines)

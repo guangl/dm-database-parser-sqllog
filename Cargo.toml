@@ -43,9 +43,5 @@ tempfile = "3.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 
 [[bench]]
-name = "tools_bench"
-harness = false
-
-[[bench]]
-name = "parser_bench"
+name = "api_bench"
 harness = false

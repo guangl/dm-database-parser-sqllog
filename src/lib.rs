@@ -11,49 +11,50 @@
 //!
 //! ## 快速开始
 //!
-//! ### 批量解析
+//! ### 从文件迭代处理 Records（推荐）
 //!
-//! ```rust
-//! use dm_database_parser_sqllog::parse_sqllogs_from_string;
+//! ```rust,no_run
+//! use dm_database_parser_sqllog::iter_records_from_file;
 //!
-//! let log_content = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT * FROM users"#;
-//! let results = parse_sqllogs_from_string(log_content);
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! for result in iter_records_from_file("sqllog.txt")? {
+//!     match result {
+//!         Ok(record) => {
+//!             // 进一步解析为 Sqllog
+//!             match record.parse_to_sqllog() {
+//!                 Ok(sqllog) => {
+//!                     println!("时间戳: {}", sqllog.ts);
+//!                     println!("用户: {}", sqllog.meta.username);
+//!                     println!("SQL: {}", sqllog.body);
+//!                 }
+//!                 Err(e) => eprintln!("解析错误: {}", e),
+//!             }
+//!         }
+//!         Err(e) => eprintln!("IO 错误: {}", e),
+//!     }
+//! }
+//! # Ok(())
+//! # }
+//! ```
 //!
-//! for result in results {
-//!     if let Ok(sqllog) = result {
-//!         println!("时间戳: {}", sqllog.ts);
-//!         println!("用户: {}", sqllog.meta.username);
+//! ### 从文件批量加载 Records
+//!
+//! ```rust,no_run
+//! use dm_database_parser_sqllog::parse_records_from_file;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let (records, errors) = parse_records_from_file("sqllog.txt")?;
+//! println!("成功解析 {} 条记录", records.len());
+//! println!("遇到 {} 个错误", errors.len());
+//!
+//! // 进一步解析为 Sqllog
+//! for record in records {
+//!     if let Ok(sqllog) = record.parse_to_sqllog() {
 //!         println!("SQL: {}", sqllog.body);
 //!     }
 //! }
-//! ```
-//!
-//! ### 流式处理
-//!
-//! ```rust
-//! use dm_database_parser_sqllog::for_each_sqllog_in_string;
-//!
-//! let log_content = r#"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1"#;
-//!
-//! let _result = for_each_sqllog_in_string(log_content, |sqllog| {
-//!     println!("处理记录: EP={}, 会话={}", sqllog.meta.ep, sqllog.meta.sess_id);
-//! });
-//! ```
-//!
-//! ### 从文件流式读取
-//!
-//! ```rust,no_run
-//! use dm_database_parser_sqllog::for_each_sqllog;
-//! use std::fs::File;
-//! use std::io::BufReader;
-//!
-//! let file = File::open("sqllog.txt").unwrap();
-//! let reader = BufReader::new(file);
-//!
-//! let _result = for_each_sqllog(reader, |sqllog| {
-//!     // 处理每条日志记录
-//!     println!("SQL: {}", sqllog.body);
-//! });
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## 日志格式
@@ -71,30 +72,21 @@
 //! ```
 
 pub mod error;
-pub mod parser;
 pub mod sqllog;
+
+// 保留 parser 和 tools 模块作为公共模块，但不自动重导出所有内容
+pub mod parser;
 pub mod tools;
 
 #[cfg(feature = "realtime")]
 pub mod realtime;
 
+// 核心类型
 pub use error::ParseError;
-pub use parser::{
-    Record,
-    RecordParser,
-    SqllogParser,
-    for_each_sqllog,
-    for_each_sqllog_from_file,
-    for_each_sqllog_in_string,
-    iter_records_from_file,
-    iter_sqllogs_from_file,
-    parse_record,
-    parse_records_from_file,
-    parse_records_from_string,
-    parse_sqllogs_from_file,
-    parse_sqllogs_from_string,
-    // 向后兼容的 deprecated 别名
-    records_from_file,
-    sqllogs_from_file,
-};
 pub use sqllog::Sqllog;
+
+// 核心解析器类型
+pub use parser::{Record, RecordParser};
+
+// Record 文件解析 API（推荐使用）
+pub use parser::{iter_records_from_file, parse_records_from_file};

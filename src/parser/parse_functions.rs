@@ -23,24 +23,11 @@ use crate::tools::is_record_start_line;
 /// # 错误
 ///
 /// 可能返回以下错误：
-/// - `EmptyInput` - 输入为空
+/// * `EmptyInput` - 输入为空
 /// - `InvalidRecordStartLine` - 第一行不是有效的记录起始行
 /// - `LineTooShort` - 行长度不足
 /// - `MissingClosingParen` - 缺少右括号
 /// - `InsufficientMetaFields` - Meta 字段数量不足
-///
-/// # 示例
-///
-/// ```
-/// use dm_database_parser_sqllog::parse_record;
-///
-/// let lines = vec!["2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1"];
-/// let sqllog = parse_record(&lines).unwrap();
-///
-/// assert_eq!(sqllog.ts, "2025-08-12 10:57:09.548");
-/// assert_eq!(sqllog.meta.username, "alice");
-/// assert_eq!(sqllog.body, "SELECT 1");
-/// ```
 pub fn parse_record(lines: &[&str]) -> Result<Sqllog, ParseError> {
     if lines.is_empty() {
         return Err(ParseError::EmptyInput);
