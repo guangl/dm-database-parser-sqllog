@@ -69,9 +69,24 @@ impl<R: Read> RecordParser<R> {
         if bytes_read == 0 {
             Ok(None)
         } else {
-            // 移除行尾的换行符
-            let line = self.buffer.trim_end_matches(&['\r', '\n'][..]).to_string();
-            Ok(Some(line))
+            // 优化：原地移除换行符，避免创建新字符串
+            let mut len = self.buffer.len();
+            while len > 0 {
+                let last_byte = self.buffer.as_bytes()[len - 1];
+                if last_byte == b'\n' || last_byte == b'\r' {
+                    len -= 1;
+                } else {
+                    break;
+                }
+            }
+
+            // 只在需要时才创建新字符串（避免额外的 trim + to_string 开销）
+            if len != self.buffer.len() {
+                self.buffer.truncate(len);
+            }
+
+            // 使用 mem::take 避免额外的克隆，保持缓冲区容量
+            Ok(Some(std::mem::take(&mut self.buffer)))
         }
     }
 

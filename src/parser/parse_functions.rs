@@ -174,53 +174,49 @@ pub(crate) fn extract_sql_body(full_body: &str) -> String {
 
 /// 解析 meta 字符串
 pub(crate) fn parse_meta(meta_str: &str) -> Result<MetaParts, ParseError> {
-    // 使用前缀定位法而非简单分割，以正确处理 appname 中的空格
+    // 使用字节级别操作加速解析
+    let bytes = meta_str.as_bytes();
+
+    // 使用 memchr 加速空格查找（比 find(' ') 快很多）
+    #[inline(always)]
+    fn find_space(bytes: &[u8]) -> Option<usize> {
+        bytes.iter().position(|&b| b == b' ')
+    }
 
     // 解析 EP - 从头开始
-    let ep_end = meta_str
-        .find(' ')
-        .ok_or(ParseError::InsufficientMetaFields {
-            count: 0,
-            raw: meta_str.to_string(),
-        })?;
+    let ep_end = find_space(bytes).ok_or(ParseError::InsufficientMetaFields {
+        count: 0,
+        raw: meta_str.to_string(),
+    })?;
     let ep = parse_ep_field(&meta_str[..ep_end], meta_str)?;
 
     // 解析 sess
     let sess_start = ep_end + 1;
-    let sess_end = meta_str[sess_start..]
-        .find(' ')
-        .ok_or(ParseError::InsufficientMetaFields {
-            count: 1,
-            raw: meta_str.to_string(),
-        })?
-        + sess_start;
+    let sess_end = find_space(&bytes[sess_start..]).ok_or(ParseError::InsufficientMetaFields {
+        count: 1,
+        raw: meta_str.to_string(),
+    })? + sess_start;
     let sess_id = extract_field_value(&meta_str[sess_start..sess_end], SESS_PREFIX, meta_str)?;
 
     // 解析 thrd
     let thrd_start = sess_end + 1;
-    let thrd_end = meta_str[thrd_start..]
-        .find(' ')
-        .ok_or(ParseError::InsufficientMetaFields {
-            count: 2,
-            raw: meta_str.to_string(),
-        })?
-        + thrd_start;
+    let thrd_end = find_space(&bytes[thrd_start..]).ok_or(ParseError::InsufficientMetaFields {
+        count: 2,
+        raw: meta_str.to_string(),
+    })? + thrd_start;
     let thrd_id = extract_field_value(&meta_str[thrd_start..thrd_end], THRD_PREFIX, meta_str)?;
 
     // 解析 user
     let user_start = thrd_end + 1;
-    let user_end = meta_str[user_start..]
-        .find(' ')
-        .ok_or(ParseError::InsufficientMetaFields {
-            count: 3,
-            raw: meta_str.to_string(),
-        })?
-        + user_start;
+    let user_end = find_space(&bytes[user_start..]).ok_or(ParseError::InsufficientMetaFields {
+        count: 3,
+        raw: meta_str.to_string(),
+    })? + user_start;
     let username = extract_field_value(&meta_str[user_start..user_end], USER_PREFIX, meta_str)?;
 
     // 解析 trxid
     let trxid_start = user_end + 1;
-    let trxid_end_result = meta_str[trxid_start..].find(' ');
+    let trxid_end_result = find_space(&bytes[trxid_start..]);
     let (trxid, after_trxid) = if let Some(trxid_end_offset) = trxid_end_result {
         let trxid_end = trxid_start + trxid_end_offset;
         (
@@ -251,7 +247,7 @@ pub(crate) fn parse_meta(meta_str: &str) -> Result<MetaParts, ParseError> {
 
     // 解析 stmt（可能不存在）
     let stmt_start = after_trxid;
-    let stmt_end_result = meta_str[stmt_start..].find(' ');
+    let stmt_end_result = find_space(&bytes[stmt_start..]);
     let (statement, after_stmt) = if let Some(stmt_end_offset) = stmt_end_result {
         let stmt_end = stmt_start + stmt_end_offset;
         (
@@ -320,9 +316,17 @@ pub(crate) fn parse_meta(meta_str: &str) -> Result<MetaParts, ParseError> {
 }
 
 /// 解析 EP 字段
-#[inline]
+#[inline(always)]
 pub(crate) fn parse_ep_field(ep_str: &str, raw: &str) -> Result<u8, ParseError> {
-    if !ep_str.starts_with("EP[") || !ep_str.ends_with(']') {
+    let bytes = ep_str.as_bytes();
+
+    // 快速检查：最小长度和格式 "EP[X]"
+    if bytes.len() < 4
+        || bytes[0] != b'E'
+        || bytes[1] != b'P'
+        || bytes[2] != b'['
+        || bytes[bytes.len() - 1] != b']'
+    {
         return Err(ParseError::InvalidEpFormat {
             value: ep_str.to_string(),
             raw: raw.to_string(),
@@ -337,20 +341,22 @@ pub(crate) fn parse_ep_field(ep_str: &str, raw: &str) -> Result<u8, ParseError> 
 }
 
 /// 从字段中提取值
-#[inline]
+#[inline(always)]
 pub(crate) fn extract_field_value(
     field: &str,
     prefix: &str,
     raw: &str,
 ) -> Result<String, ParseError> {
-    field
-        .strip_prefix(prefix)
-        .map(|s| s.to_string())
-        .ok_or_else(|| ParseError::InvalidFieldFormat {
+    if field.len() >= prefix.len() && &field[..prefix.len()] == prefix {
+        // 直接使用切片，避免 strip_prefix 的额外检查
+        Ok(field[prefix.len()..].to_string())
+    } else {
+        Err(ParseError::InvalidFieldFormat {
             expected: prefix.to_string(),
             actual: field.to_string(),
             raw: raw.to_string(),
         })
+    }
 }
 
 /// 解析 indicators 部分
