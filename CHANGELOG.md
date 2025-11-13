@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **全面的 Benchmark 测试体系**：新增 5 个 benchmark 文件，覆盖所有核心组件
+  - `benches/api_bench.rs` - API 函数性能测试（3 组测试）
+  - `benches/parse_functions_bench.rs` - 解析函数性能测试（8 组测试，60+ 场景）
+  - `benches/record_bench.rs` - Record 结构性能测试（6 组测试）
+  - `benches/record_parser_bench.rs` - RecordParser 迭代器性能测试（6 组测试）
+  - `benches/tools_bench.rs` - 工具函数性能测试（7 组测试）
+
+- **Benchmark 文档**：
+  - `BENCHMARKS.md` - 完整的 benchmark 文档和最佳实践
+  - `BENCHMARK_QUICK_START.md` - 快速入门指南
+
+- **示例代码**：
+  - `examples/perf_full_test.rs` - 完整解析性能测试
+  - `examples/perf_record_only.rs` - 仅记录识别性能测试
+  - `examples/streaming_parse.rs` - 流式解析示例
+
+### Changed
+
+- **测试结构重组**：将所有测试从 `src/parser/tests.rs` 迁移到 `tests/` 目录
+  - 创建 4 个集成测试文件（`api.rs`, `record.rs`, `record_parser.rs`, `parse_functions.rs`）
+  - 保持单元测试在源码中（`sqllog.rs`, `tools.rs`）
+  - 测试统计：107 个测试（78 集成 + 29 单元）
+
+- **API 变更**：
+  - `parse_records_from_file` 现在返回 `(Vec<Sqllog>, Vec<ParseError>)` 元组
+  - 将部分内部函数暴露为 `pub`（通过 `__test_helpers` 模块供测试使用）
+
+- **文档更新**：
+  - 新增 `TESTS.md` - 详细的测试说明文档
+  - 更新 `README.md` 反映新的测试和 benchmark 结构
+  - 删除 `docs/BENCHMARK_API.md`（整合到新文档中）
+
+### Performance
+
+- 测试覆盖率：94.69%（行覆盖），98.80%（函数覆盖），93.92%（区域覆盖）
+- Benchmark 覆盖：30+ 组测试场景，60+ 个具体测试
+- 核心函数性能：
+  - `parse_record` 单行：~470 ns
+  - `parse_record` 多行：~480 ns
+  - `is_record_start_line` 有效行：~20-45 ns
+  - `is_record_start_line` 无效行：~0.8 ns
+
 ## [0.3.0] - 2025-01-24
 
 ### Added
