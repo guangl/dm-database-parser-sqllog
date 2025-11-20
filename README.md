@@ -130,7 +130,7 @@ invalid EP format: EPX0] | raw: EPX0] sess:123 thrd:456 user:alice trxid:0 stmt:
 
 | API | 返回类型 | 内存占用 | 性能 | 适用场景 |
 |-----|---------|---------|------|----------|
-| `iter_records_from_file()` | `SqllogIterator<BufReader<File>>` | 低（批量缓冲） | 2.7秒 | 流式处理、需要提前中断 |
+| `iter_records_from_file()` | `Iterator<Item = Result<Sqllog, ParseError>>` | 低（批量缓冲） | 2.7秒 | 流式处理、需要提前中断 |
 | `parse_records_from_file()` | `(Vec<Sqllog>, Vec<ParseError>)` | 高（一次性） | 2.5秒 | 批量处理、需要多次遍历 |
 
 **选择建议**：
@@ -165,7 +165,7 @@ cargo run --example stream_processing
 
 ### 文件解析 API（推荐）
 
-- [`iter_records_from_file`] - 从文件流式读取 SQL 日志，返回 `SqllogIterator`（内存高效，批量缓冲 + 并行处理）
+- [`iter_records_from_file`] - 从文件流式读取 SQL 日志，返回一个迭代器（内存高效，批量缓冲 + 并行处理）
 - [`parse_records_from_file`] - 从文件批量加载 SQL 日志，返回 `(Vec<Sqllog>, Vec<ParseError>)`（自动并行处理）
 
 ### 核心类型

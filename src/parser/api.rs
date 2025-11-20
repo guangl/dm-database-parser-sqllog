@@ -2,80 +2,14 @@
 //!
 //! 提供了一组方便使用的高层 API，用于快速解析 SQL 日志。
 
-use crate::error::ParseError;
 use crate::parser::record_parser::RecordParser;
 use crate::sqllog::Sqllog;
-use rayon::prelude::*;
-use std::collections;
+use crate::error::ParseError;
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::BufReader;
 use std::path::Path;
 
-/// Sqllog 迭代器，使用批量缓冲 + 并行处理优化性能
-pub struct SqllogIterator<R: Read> {
-    record_parser: RecordParser<R>,
-    buffer: collections::VecDeque<Result<Sqllog, ParseError>>,
-    batch_size: usize,
-}
-
-impl<R: Read> SqllogIterator<R> {
-    /// 创建新的 SqllogIterator，使用默认批次大小（10000）
-    pub fn new(record_parser: RecordParser<R>) -> Self {
-        Self {
-            record_parser,
-            buffer: collections::VecDeque::new(),
-            batch_size: 10000, // 每次并行处理 1万条
-        }
-    }
-
-    /// 填充缓冲区：批量读取记录并并行解析
-    fn fill_buffer(&mut self) {
-        use crate::parser::record::Record;
-
-        let mut records: Vec<Record> = Vec::with_capacity(self.batch_size);
-
-        // 批量读取记录
-        for _ in 0..self.batch_size {
-            match self.record_parser.next() {
-                Some(Ok(record)) => records.push(record),
-                Some(Err(io_err)) => {
-                    self.buffer
-                        .push_back(Err(ParseError::IoError(io_err.to_string())));
-                }
-                None => break,
-            }
-        }
-
-        if records.is_empty() {
-            return;
-        }
-
-        // 并行解析
-        let results: Vec<Result<Sqllog, ParseError>> = records
-            .par_iter()
-            .map(|record| record.parse_to_sqllog())
-            .collect();
-
-        // 将结果放入缓冲区
-        for result in results {
-            self.buffer.push_back(result);
-        }
-    }
-}
-
-impl<R: Read> Iterator for SqllogIterator<R> {
-    type Item = Result<Sqllog, ParseError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // 如果缓冲区为空，尝试填充
-        if self.buffer.is_empty() {
-            self.fill_buffer();
-        }
-
-        // 从缓冲区取出结果
-        self.buffer.pop_front()
-    }
-}
+// SqllogIterator 已移入 record_parser.rs 并非公共导出
 
 /// 从文件读取并返回 Sqllog 迭代器（流式处理）
 ///
@@ -88,7 +22,7 @@ impl<R: Read> Iterator for SqllogIterator<R> {
 ///
 /// # 返回
 ///
-/// * `Ok(SqllogIterator<BufReader<File>>)` - Sqllog 迭代器
+/// * `Ok(Iterator)` - 返回一个用于流式解析的迭代器，迭代项是 `Result<Sqllog, ParseError>`
 /// * `Err(ParseError)` - 文件打开错误
 ///
 /// # 示例
@@ -118,7 +52,7 @@ impl<R: Read> Iterator for SqllogIterator<R> {
 /// println!("成功: {} 条, 错误: {} 个", sqllog_count, error_count);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub fn iter_records_from_file<P>(path: P) -> Result<SqllogIterator<BufReader<File>>, ParseError>
+pub fn iter_records_from_file<P>(path: P) -> Result<impl Iterator<Item = Result<Sqllog, ParseError>>, ParseError>
 where
     P: AsRef<Path>,
 {
@@ -128,7 +62,8 @@ where
     })?;
     let reader = BufReader::new(file);
     let record_parser = RecordParser::new(reader);
-    Ok(SqllogIterator::new(record_parser))
+    // 返回一个隐藏的具体迭代器实现（crate 内部定义）
+    Ok(crate::parser::record_parser::SqllogIterator::new(record_parser))
 }
 
 /// 从文件读取并并行解析为 Sqllog（高性能版本）

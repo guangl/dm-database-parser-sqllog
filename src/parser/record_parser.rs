@@ -4,10 +4,14 @@
 
 use crate::parser::record::Record;
 use crate::tools::is_record_start_line;
+use crate::error::ParseError;
+use crate::sqllog::Sqllog;
+use rayon::prelude::*;
 use std::{
     io::{self, BufRead, BufReader, Read},
     mem,
 };
+use std::collections::VecDeque;
 
 /// 从 Reader 中按行读取并解析成 Record 的迭代器
 ///
@@ -129,5 +133,71 @@ impl<R: Read> Iterator for RecordParser<R> {
             Ok(()) => Some(Ok(record)),
             Err(e) => Some(Err(e)),
         }
+    }
+}
+
+/// Sqllog 迭代器，使用批量缓冲 + 并行处理优化性能
+///
+/// 该迭代器用于从 `RecordParser` 并行转换为 `Sqllog`，并在 crate 内部使用。
+pub(crate) struct SqllogIterator<R: Read> {
+    record_parser: RecordParser<R>,
+    buffer: VecDeque<Result<Sqllog, ParseError>>,
+    batch_size: usize,
+}
+
+impl<R: Read> SqllogIterator<R> {
+    /// 创建新的 SqllogIterator，使用默认批次大小（10000）
+    pub(crate) fn new(record_parser: RecordParser<R>) -> Self {
+        Self {
+            record_parser,
+            buffer: VecDeque::new(),
+            batch_size: 10000, // 每次并行处理 1万条
+        }
+    }
+
+    /// 填充缓冲区：批量读取记录并并行解析
+    fn fill_buffer(&mut self) {
+        let mut records: Vec<Record> = Vec::with_capacity(self.batch_size);
+
+        // 批量读取记录
+        for _ in 0..self.batch_size {
+            match self.record_parser.next() {
+                Some(Ok(record)) => records.push(record),
+                Some(Err(io_err)) => {
+                    self.buffer
+                        .push_back(Err(ParseError::IoError(io_err.to_string())));
+                }
+                None => break,
+            }
+        }
+
+        if records.is_empty() {
+            return;
+        }
+
+        // 并行解析
+        let results: Vec<Result<Sqllog, ParseError>> = records
+            .par_iter()
+            .map(|record| record.parse_to_sqllog())
+            .collect();
+
+        // 将结果放入缓冲区
+        for result in results {
+            self.buffer.push_back(result);
+        }
+    }
+}
+
+impl<R: Read> Iterator for SqllogIterator<R> {
+    type Item = Result<Sqllog, ParseError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // 如果缓冲区为空，尝试填充
+        if self.buffer.is_empty() {
+            self.fill_buffer();
+        }
+
+        // 从缓冲区取出结果
+        self.buffer.pop_front()
     }
 }
