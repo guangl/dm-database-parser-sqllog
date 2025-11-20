@@ -98,7 +98,6 @@ jobs:
           fi
 
       - name: Publish to crates.io
-        if: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
           cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
         env:
