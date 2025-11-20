@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 清理和优化 README 文档，删除不再支持的 API 示例和说明
 - 优化 parser 相关代码结构，去除无用重导出和条件编译
 - 同步依赖锁文件，移除无用依赖
+- 将 `SqllogIterator` 设为 crate 内部实现并从 `api.rs` 中移除，避免将内部实现暴露为公共类型
 
 ### Fixed
 - 修复 release.yml 的 CI 触发条件和 secrets 判断语法，兼容 GitHub Actions 标准
