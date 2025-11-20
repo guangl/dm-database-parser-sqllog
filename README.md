@@ -10,7 +10,6 @@
 ## 主要特点
 
 - **零分配解析**：基于时间戳的记录切分，使用流式 API 避免额外内存分配
-- **实时监控**：支持实时监控 SQL 日志文件变化，增量解析新增内容（v0.3.0+）
 - **高效模式匹配**：使用双数组 Aho-Corasick（daachorse）进行高效模式匹配
 - **轻量级结构**：解析结果使用引用（`&str`），避免不必要的字符串复制
 - **灵活的 API**：提供批量解析、流式解析、实时监控等多种使用方式
@@ -27,38 +26,6 @@ dm-database-parser-sqllog = "0.4"
 ```
 
 ## 快速开始
-
-### 基本用法
-
-### 从字符串解析
-
-```rust
-use dm_database_parser_sqllog::{parse_records_from_string, parse_sqllogs_from_string};
-
-let log_text = r#"2025-08-12 10:57:09.562 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1"#;
-
-// 方法 1: 解析为 Record 列表（自动跳过无效行）
-let records = parse_records_from_string(log_text);
-println!("找到 {} 条记录", records.len());
-
-// 方法 2: 解析为 Sqllog 列表（包含成功和失败的）
-let results = parse_sqllogs_from_string(log_text);
-for result in results {
-    match result {
-        Ok(sqllog) => {
-            println!("用户: {}, 事务ID: {}, SQL: {}",
-                sqllog.meta.username, sqllog.meta.trxid, sqllog.body);
-
-            // 获取性能指标（如果有）
-            if let Some(time) = sqllog.execute_time() {
-                println!("执行时间: {:.2}ms", time);
-            }
-        }
-        Err(e) => eprintln!("解析错误: {}", e),
-    }
-}
-```
-
 
 ### 从文件读取
 
@@ -234,7 +201,6 @@ cargo bench --bench tools_bench
 
 # 查看性能报告
 # HTML 可视化报告: target/criterion/report/index.html
-# Benchmark 文档: BENCHMARKS.md
 
 # 运行示例
 cargo run --example basic
@@ -317,10 +283,6 @@ cargo llvm-cov --html --ignore-filename-regex='target|tests'
 - `record_parser_bench.rs` - RecordParser 性能测试 (6 组测试)
 - `tools_bench.rs` - 工具函数性能测试 (7 组测试)
 
-详细说明:
-- 测试文档: **[TESTS.md](TESTS.md)**
-- Benchmark 文档: **[BENCHMARKS.md](BENCHMARKS.md)**
-
 ### 测试覆盖率
 
 **当前覆盖率: 94.69%** ✅
@@ -353,4 +315,3 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 - [Crates.io](https://crates.io/crates/dm-database-parser-sqllog)
 - [文档](https://docs.rs/dm-database-parser-sqllog)
 - [GitHub](https://github.com/guangl/dm-parser-sqllog)
-- [性能测试报告](docs/PERFORMANCE_BENCHMARK.md)

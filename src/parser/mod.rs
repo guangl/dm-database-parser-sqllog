@@ -11,7 +11,6 @@ pub(crate) mod parse_functions;
 pub mod record;
 pub mod record_parser;
 
-// 重导出公共 API
 pub use api::{SqllogIterator, iter_records_from_file, parse_records_from_file};
 pub use record::Record;
 pub use record_parser::RecordParser;

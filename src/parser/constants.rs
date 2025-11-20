@@ -2,10 +2,6 @@
 //!
 //! 定义了解析过程中使用的所有常量，包括长度常量、字段前缀、指标模式等。
 
-use once_cell::sync::Lazy;
-
-// 长度相关常量
-
 /// 时间戳字符串的固定长度（"YYYY-MM-DD HH:MM:SS.mmm"）
 pub const TIMESTAMP_LENGTH: usize = 23;
 
@@ -21,8 +17,7 @@ pub const BODY_OFFSET: usize = 2;
 // 使用 Lazy 静态初始化 indicator 模式集合，避免重复创建
 
 /// Indicator 关键字模式数组（用于查找 indicator 在 body 中的位置）
-pub static INDICATOR_PATTERNS: Lazy<[&'static str; 3]> =
-    Lazy::new(|| ["EXECTIME:", "ROWCOUNT:", "EXEC_ID:"]);
+pub static INDICATOR_PATTERNS: [&'static str; 3] = ["EXECTIME:", "ROWCOUNT:", "EXEC_ID:"];
 
 // Meta 字段前缀常量
 

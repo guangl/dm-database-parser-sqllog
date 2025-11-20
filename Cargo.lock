@@ -200,7 +200,6 @@ version = "0.4.0"
 dependencies = [
  "criterion",
  "memchr",
- "once_cell",
  "rayon",
  "rusqlite",
  "tempfile",
