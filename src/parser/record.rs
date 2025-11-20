@@ -3,6 +3,7 @@
 //! Record 表示一条原始的日志记录，可能包含多行（起始行 + 继续行）。
 
 use crate::error::ParseError;
+use crate::parser::parse_functions;
 use crate::sqllog::Sqllog;
 
 /// 表示一条完整的日志记录（可能包含多行）
@@ -82,6 +83,6 @@ impl Record {
     /// * `Err(ParseError)` - 解析失败
     pub fn parse_to_sqllog(&self) -> Result<Sqllog, ParseError> {
         let lines: Vec<&str> = self.lines.iter().map(|s| s.as_str()).collect();
-        super::parse_functions::parse_record(&lines)
+        parse_functions::parse_record(&lines)
     }
 }

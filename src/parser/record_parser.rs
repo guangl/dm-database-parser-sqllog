@@ -4,7 +4,10 @@
 
 use crate::parser::record::Record;
 use crate::tools::is_record_start_line;
-use std::io::{BufRead, BufReader, Read};
+use std::{
+    io::{self, BufRead, BufReader, Read},
+    mem,
+};
 
 /// 从 Reader 中按行读取并解析成 Record 的迭代器
 ///
@@ -62,7 +65,7 @@ impl<R: Read> RecordParser<R> {
     }
 
     /// 读取下一行
-    fn read_line(&mut self) -> std::io::Result<Option<String>> {
+    fn read_line(&mut self) -> io::Result<Option<String>> {
         self.buffer.clear();
         let bytes_read = self.reader.read_line(&mut self.buffer)?;
 
@@ -86,12 +89,12 @@ impl<R: Read> RecordParser<R> {
             }
 
             // 使用 mem::take 避免额外的克隆，保持缓冲区容量
-            Ok(Some(std::mem::take(&mut self.buffer)))
+            Ok(Some(mem::take(&mut self.buffer)))
         }
     }
 
     /// 获取下一个记录的起始行
-    fn get_start_line(&mut self) -> std::io::Result<Option<String>> {
+    fn get_start_line(&mut self) -> io::Result<Option<String>> {
         // 如果有缓存的下一行（上次读取时遇到的新起始行）
         if let Some(line) = self.next_line.take() {
             return Ok(Some(line));
@@ -111,7 +114,7 @@ impl<R: Read> RecordParser<R> {
     }
 
     /// 读取当前记录的所有继续行
-    fn read_continuation_lines(&mut self, record: &mut Record) -> std::io::Result<()> {
+    fn read_continuation_lines(&mut self, record: &mut Record) -> io::Result<()> {
         loop {
             match self.read_line()? {
                 Some(line) if is_record_start_line(&line) => {
@@ -135,7 +138,7 @@ impl<R: Read> RecordParser<R> {
 }
 
 impl<R: Read> Iterator for RecordParser<R> {
-    type Item = std::io::Result<Record>;
+    type Item = io::Result<Record>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.finished {

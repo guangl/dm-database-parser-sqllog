@@ -6,6 +6,7 @@ use crate::error::ParseError;
 use crate::parser::record_parser::RecordParser;
 use crate::sqllog::Sqllog;
 use rayon::prelude::*;
+use std::collections;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
@@ -13,7 +14,7 @@ use std::path::Path;
 /// Sqllog 迭代器，使用批量缓冲 + 并行处理优化性能
 pub struct SqllogIterator<R: Read> {
     record_parser: RecordParser<R>,
-    buffer: std::collections::VecDeque<Result<Sqllog, ParseError>>,
+    buffer: collections::VecDeque<Result<Sqllog, ParseError>>,
     batch_size: usize,
 }
 
@@ -22,7 +23,7 @@ impl<R: Read> SqllogIterator<R> {
     pub fn new(record_parser: RecordParser<R>) -> Self {
         Self {
             record_parser,
-            buffer: std::collections::VecDeque::new(),
+            buffer: collections::VecDeque::new(),
             batch_size: 10000, // 每次并行处理 1万条
         }
     }
