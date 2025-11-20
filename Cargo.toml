@@ -1,6 +1,6 @@
 [package]
 name = "dm-database-parser-sqllog"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 authors = ["guangl"]
 description = "一个高性能的达梦数据库 sqllog 日志解析库，提供零分配或低分配的记录切分与解析功能，支持实时监控"
