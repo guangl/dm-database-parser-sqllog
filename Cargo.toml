@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["guangl"]
 description = "一个高性能的达梦数据库 sqllog 日志解析库，提供零分配或低分配的记录切分与解析功能，支持实时监控"
 license = "MIT"
-repository = "https://github.com/guangl/dm-parser-sqllog"
+repository = "https://github.com/guangl/dm-database-parser-sqllog"
 documentation = "https://docs.rs/dm-database-parser-sqllog"
 homepage = "https://github.com/guangl/dm-parser-sqllog"
 keywords = ["sqllog", "parser", "dm-database"]
@@ -30,14 +30,7 @@ path = "src/lib.rs"
 once_cell = "1.21.3"
 thiserror = "2.0.17"
 memchr = "2.7"
-rayon = "1.10"                                                      # 并行处理
-serde = { version = "1.0", features = ["derive"], optional = true }
-notify = { version = "8.2", optional = true }
-
-[features]
-default = []
-serde = ["dep:serde"]
-realtime = ["dep:notify"]
+rayon = "1.10"       # 并行处理
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

@@ -2,16 +2,12 @@
 //!
 //! 定义了解析后的 SQL 日志记录的数据结构。
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 /// SQL 日志记录
 ///
 /// 表示一条完整的 SQL 日志记录，包含时间戳、元数据、SQL 语句体和可选的性能指标。
 ///
 
 #[derive(Debug, Clone, PartialEq, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Sqllog {
     /// 时间戳，格式为 "YYYY-MM-DD HH:MM:SS.mmm"
     pub ts: String,
@@ -30,7 +26,6 @@ pub struct Sqllog {
 ///
 /// 包含日志记录的所有元数据字段，如会话 ID、用户名等。
 #[derive(Debug, Clone, PartialEq, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MetaParts {
     /// EP（Execution Point）编号，范围 0-255
     pub ep: u8,
@@ -63,7 +58,6 @@ pub struct MetaParts {
 ///
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IndicatorsParts {
     /// 执行时间（毫秒）
     pub execute_time: f32,

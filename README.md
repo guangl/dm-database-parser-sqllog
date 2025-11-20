@@ -62,22 +62,6 @@ for result in results {
 }
 ```
 
-### 流式处理（回调模式）
-
-```rust
-use dm_database_parser_sqllog::for_each_sqllog_in_string;
-
-let log_text = r#"..."#; // 大量日志文本
-
-// 对每个 Sqllog 调用回调函数（适合大数据流式处理）
-let count = for_each_sqllog_in_string(log_text, |sqllog| {
-    println!("EP: {}, 用户: {}, SQL: {}",
-        sqllog.meta.ep, sqllog.meta.username, sqllog.body);
-}).unwrap();
-
-println!("处理了 {} 条记录", count);
-```
-
 
 ### 从文件读取
 
@@ -132,31 +116,6 @@ use dm_database_parser_sqllog::parse_records_from_file;
 // 一次性加载所有 SQL 日志（自动并行处理）
 let (sqllogs, errors) = parse_records_from_file("log.sqllog")?;
 println!("成功解析 {} 条 SQL 日志，遇到 {} 个错误", sqllogs.len(), errors.len());````
-```
-
-#### 方式二：批量加载（适合需要一次性获取所有结果）
-
-使用批量 API 可以一次性加载所有 SQL 日志，内部自动使用并行处理：
-
-```rust
-use dm_database_parser_sqllog::parse_records_from_file;
-
-// 一次性加载所有 SQL 日志（自动并行处理）
-let (sqllogs, errors) = parse_records_from_file("log.sqllog")?;
-println!("成功解析 {} 条 SQL 日志，遇到 {} 个错误", sqllogs.len(), errors.len());
-
-// 处理解析好的 SQL 日志
-for sqllog in sqllogs {
-    println!("用户: {}, SQL: {}", sqllog.meta.username, sqllog.body);
-    if let Some(exec_time) = sqllog.execute_time() {
-        println!("执行时间: {:.2}ms", exec_time);
-    }
-}
-
-// 处理解析错误
-for error in errors {
-    eprintln!("解析错误: {}", error);
-}
 ```
 
 ### 错误处理和调试
@@ -280,19 +239,6 @@ cargo run --example stream_processing
 
 完整的 API 文档请查看 [docs.rs](https://docs.rs/dm-database-parser-sqllog)。
 
-### 主要类型
-
-- [`Sqllog`] - 解析后的 SQL 日志结构体（包含时间戳、元数据、SQL 文本、性能指标等）
-- [`Record`] - 原始日志记录结构（包含起始行和总行数）
-- [`ParseError`] - 解析错误类型
-
-### 核心解析器
-
-- [`RecordParser`] - 记录解析迭代器，将日志文本按时间戳切分为记录
-- [`SqllogParser`] - SQL 日志解析迭代器，将记录解析为 `Sqllog` 结构体
-
-### 字符串解析 API
-
 ### 文件解析 API（推荐）
 
 - [`iter_records_from_file`] - 从文件流式读取 SQL 日志，返回 `SqllogIterator`（内存高效，批量缓冲 + 并行处理）
@@ -302,7 +248,6 @@ cargo run --example stream_processing
 
 - [`Sqllog`] - SQL 日志结构体（包含时间戳、元数据、SQL 正文等）
 - [`ParseError`] - 解析错误类型（包含详细错误信息）
-- [`Record`] - 原始记录结构（内部使用，一般不需要直接操作）
 
 ## 设计与注意事项
 
@@ -343,52 +288,6 @@ cargo doc --open
 
 ## 性能
 
-### 🚀 性能亮点
-
-经过深度优化，本库在处理大型日志文件时表现出色：
-
-**1GB 日志文件（301 万条记录）处理性能：**
-
-| 处理模式 | 耗时 | 速度 | 说明 |
-|---------|------|------|------|
-| **记录识别** | **~1.6秒** | 188万条/秒 | 仅识别和切分记录 |
-| **完整解析** | **~4.5秒** | 67万条/秒 | 识别 + 完整解析（包含 meta、body、indicators） |
-| 原始版本（未优化） | ~8秒 | 38万条/秒 | 优化前性能 |
-
-**性能提升：**
-- ✅ 记录识别速度提升 **5倍**（8秒 → 1.6秒，降低 80%）
-- ✅ 完整解析速度提升 **44%**（8秒 → 4.5秒）
-- ✅ 远超性能目标（3-4秒），达到生产级性能要求
-
-### 性能优化技术
-
-1. **字节级操作**（贡献 40-50%）
-   - 使用 `&[u8]` 直接内存比较代替字符串操作
-   - 避免 UTF-8 验证和字符边界检查
-   - 支持 CPU SIMD 向量化优化
-
-2. **零拷贝内存管理**（贡献 20-30%）
-   - `std::mem::take` 移动所有权避免克隆
-   - 原地修改代替创建新字符串
-   - 从 900万次内存分配减少到 <100次
-
-3. **早期退出策略**（贡献 10-15%）
-   - 分层验证：长度 → 时间戳 → 括号 → 字段
-   - 70% 的续行在前 2 步就被过滤
-   - CPU 缓存友好的热点代码
-
-4. **函数内联优化**（贡献 5-10%）
-   - 关键路径使用 `#[inline(always)]`
-   - 消除 301万次函数调用开销
-   - 支持编译器跨函数优化
-
-5. **一次扫描解析**（贡献 10-15%）
-   - 手工解析比正则表达式快 10-20倍
-   - 零回溯、零临时分配
-   - CPU 缓存局部性好
-
-详细性能分析请查看：**[PERFORMANCE_ANALYSIS.md](PERFORMANCE_ANALYSIS.md)**
-
 ### API 性能对比
 
 对外公开的主要 API 性能对比（使用真实日志文件测试）：
@@ -407,8 +306,6 @@ cargo doc --open
 **选择建议**：
 - 优先使用 `parse_records_from_file`：代码简洁，性能最佳
 - 大文件或需要提前中断时使用 `iter_records_from_file`：内存友好
-
-详细的 API 性能测试报告请查看：**[docs/BENCHMARK_API.md](docs/BENCHMARK_API.md)**
 
 ## 测试
 

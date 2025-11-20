@@ -71,15 +71,9 @@ pub mod sqllog;
 pub mod parser;
 pub mod tools;
 
-#[cfg(feature = "realtime")]
-pub mod realtime;
-
 // 核心类型
 pub use error::ParseError;
 pub use sqllog::Sqllog;
-
-// 核心解析器类型
-pub use parser::{Record, RecordParser};
 
 // 文件解析 API
 pub use parser::{iter_records_from_file, parse_records_from_file};
