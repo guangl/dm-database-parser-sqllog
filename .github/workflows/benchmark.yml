@@ -2,12 +2,12 @@ name: Benchmark
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
   schedule:
     # 每周一运行基准测试
-    - cron: '0 0 * * 1'
+    - cron: "0 0 * * 1"
   workflow_dispatch:
 
 env:
@@ -70,7 +70,7 @@ jobs:
           script: |
             const fs = require('fs');
             const path = require('path');
-            
+
             // 尝试读取基准测试结果摘要
             try {
               const summary = fs.readFileSync('parser_bench.html', 'utf8');
@@ -85,4 +85,3 @@ jobs:
             } catch (error) {
               console.log('Could not read benchmark results:', error);
             }
-
