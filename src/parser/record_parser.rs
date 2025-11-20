@@ -2,16 +2,16 @@
 //!
 //! 提供了一个迭代器，可以从任何实现了 `Read` trait 的源中逐条读取日志记录。
 
-use crate::parser::record::Record;
-use crate::tools::is_record_start_line;
 use crate::error::ParseError;
+use crate::parser::record::Record;
 use crate::sqllog::Sqllog;
+use crate::tools::is_record_start_line;
 use rayon::prelude::*;
+use std::collections::VecDeque;
 use std::{
     io::{self, BufRead, BufReader, Read},
     mem,
 };
-use std::collections::VecDeque;
 
 /// 从 Reader 中按行读取并解析成 Record 的迭代器
 ///

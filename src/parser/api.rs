@@ -2,9 +2,9 @@
 //!
 //! 提供了一组方便使用的高层 API，用于快速解析 SQL 日志。
 
+use crate::error::ParseError;
 use crate::parser::record_parser::RecordParser;
 use crate::sqllog::Sqllog;
-use crate::error::ParseError;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -52,7 +52,9 @@ use std::path::Path;
 /// println!("成功: {} 条, 错误: {} 个", sqllog_count, error_count);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub fn iter_records_from_file<P>(path: P) -> Result<impl Iterator<Item = Result<Sqllog, ParseError>>, ParseError>
+pub fn iter_records_from_file<P>(
+    path: P,
+) -> Result<impl Iterator<Item = Result<Sqllog, ParseError>>, ParseError>
 where
     P: AsRef<Path>,
 {
@@ -63,7 +65,9 @@ where
     let reader = BufReader::new(file);
     let record_parser = RecordParser::new(reader);
     // 返回一个隐藏的具体迭代器实现（crate 内部定义）
-    Ok(crate::parser::record_parser::SqllogIterator::new(record_parser))
+    Ok(crate::parser::record_parser::SqllogIterator::new(
+        record_parser,
+    ))
 }
 
 /// 从文件读取并并行解析为 Sqllog（高性能版本）
