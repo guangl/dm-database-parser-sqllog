@@ -17,7 +17,7 @@ pub const BODY_OFFSET: usize = 2;
 // 使用 Lazy 静态初始化 indicator 模式集合，避免重复创建
 
 /// Indicator 关键字模式数组（用于查找 indicator 在 body 中的位置）
-pub static INDICATOR_PATTERNS: [&'static str; 3] = ["EXECTIME:", "ROWCOUNT:", "EXEC_ID:"];
+pub static INDICATOR_PATTERNS: [&str; 3] = ["EXECTIME:", "ROWCOUNT:", "EXEC_ID:"];
 
 // Meta 字段前缀常量
 

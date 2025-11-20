@@ -35,23 +35,3 @@ thiserror = "2.0.17"
 criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
-
-[[bench]]
-name = "api_bench"
-harness = false
-
-[[bench]]
-name = "parse_functions_bench"
-harness = false
-
-[[bench]]
-name = "record_bench"
-harness = false
-
-[[bench]]
-name = "record_parser_bench"
-harness = false
-
-[[bench]]
-name = "tools_bench"
-harness = false
