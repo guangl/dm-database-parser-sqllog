@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2025-11-20
+
+### Changed
+- 升级依赖：rayon 升级到 1.11.0，memchr 升级到 2.7.6，thiserror 升级到 2.0.17
+- 移除可选依赖和特性相关代码（serde、notify），简化 Cargo.toml
+- 修正仓库链接，repository 字段改为实际地址
+- 清理和优化 README 文档，删除不再支持的 API 示例和说明
+- 优化 parser 相关代码结构，去除无用重导出和条件编译
+- 同步依赖锁文件，移除无用依赖
+
+### Fixed
+- 修复 release.yml 的 CI 触发条件和 secrets 判断语法，兼容 GitHub Actions 标准
+- 修复 CI 只在 Rust 源码和 Cargo 文件变更时触发
+
 ## [0.4.0] - 2025-11-13
 
 ### Added
