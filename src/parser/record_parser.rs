@@ -17,22 +17,6 @@ use std::{
 /// # 类型参数
 ///
 /// * `R` - 实现了 `Read` trait 的类型
-///
-/// # 示例
-///
-/// ```no_run
-/// use dm_database_parser_sqllog::RecordParser;
-/// use std::fs::File;
-///
-/// let file = File::open("sqllog.txt").unwrap();
-/// let parser = RecordParser::new(file);
-///
-/// for result in parser {
-///     if let Ok(record) = result {
-///         println!("记录: {}", record.start_line());
-///     }
-/// }
-/// ```
 pub struct RecordParser<R: Read> {
     reader: BufReader<R>,
     buffer: String,
@@ -41,20 +25,6 @@ pub struct RecordParser<R: Read> {
 }
 
 impl<R: Read> RecordParser<R> {
-    /// 创建新的 RecordParser
-    ///
-    /// # 参数
-    ///
-    /// * `reader` - 任何实现了 `Read` trait 的类型（如 File、&[u8] 等）
-    ///
-    /// # 示例
-    ///
-    /// ```
-    /// use dm_database_parser_sqllog::RecordParser;
-    ///
-    /// let data = b"2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1";
-    /// let parser = RecordParser::new(&data[..]);
-    /// ```
     pub fn new(reader: R) -> Self {
         Self {
             reader: BufReader::new(reader),
