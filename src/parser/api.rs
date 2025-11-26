@@ -22,8 +22,7 @@ use std::path::Path;
 ///
 /// # 返回
 ///
-/// * `Ok(Iterator)` - 返回一个用于流式解析的迭代器，迭代项是 `Result<Sqllog, ParseError>`
-/// * `Err(ParseError)` - 文件打开错误
+/// * `Iterator<Item = Result<Sqllog, ParseError>>` - 返回一个用于流式解析的迭代器，迭代项可能包含 `ParseError`，例如文件打开失败或解析错误
 ///
 /// # 示例
 ///
@@ -62,7 +61,9 @@ where
             let reader = BufReader::new(file);
             let record_parser = RecordParser::new(reader);
             // 返回一个隐藏的具体迭代器实现（crate 内部定义）
-            Box::new(crate::parser::record_parser::SqllogIterator::new(record_parser))
+            Box::new(crate::parser::record_parser::SqllogIterator::new(
+                record_parser,
+            ))
         }
         Err(e) => Box::new(std::iter::once(Err(ParseError::FileNotFound {
             path: format!("{}: {}", path_ref.display(), e),
@@ -87,8 +88,7 @@ where
 ///
 /// # 返回
 ///
-/// * `Ok((Vec<Sqllog>, Vec<ParseError>))` - 成功解析的 Sqllog 和遇到的错误
-/// * `Err(ParseError)` - 文件打开错误
+/// * `(Vec<Sqllog>, Vec<ParseError>)` - 成功解析的 Sqllog 列表以及解析中遇到的错误（包括文件打开错误）
 ///
 /// # 示例
 ///
