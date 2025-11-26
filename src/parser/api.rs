@@ -4,8 +4,6 @@
 
 use crate::error::ParseError;
 use crate::parser::record_parser::RecordParser;
-use crate::parser::record::Record;
-use rayon::prelude::*;
 use crate::sqllog::Sqllog;
 use std::fs::File;
 use std::io::BufReader;
@@ -71,90 +69,4 @@ where
             path: format!("{}: {}", path_ref.display(), e),
         }))),
     }
-}
-
-/// 从文件读取并并行解析为 Sqllog（高性能版本）
-///
-/// 此函数使用并行处理，将日志文件解析为 Sqllog 列表。
-/// 适合处理大文件（GB 级别），先识别所有记录，然后并行解析。
-///
-/// # 性能
-///
-/// - 1GB 文件（300万条记录）：约 2.5-2.7 秒
-/// - 与流式处理性能相当（流式也使用批量并行优化）
-/// - 内存使用：批量加载所有记录到内存
-///
-/// # 参数
-///
-/// * `path` - 日志文件路径
-///
-/// # 返回
-///
-/// * `(Vec<Sqllog>, Vec<ParseError>)` - 成功解析的 Sqllog 列表以及解析中遇到的错误（包括文件打开错误）
-///
-/// # 示例
-///
-/// ```no_run
-/// use dm_database_parser_sqllog::parse_records_from_file;
-///
-/// let (sqllogs, errors) = parse_records_from_file("large_log.txt");
-///
-/// println!("成功解析 {} 条 SQL 日志", sqllogs.len());
-/// println!("遇到 {} 个错误", errors.len());
-///
-/// for sqllog in sqllogs.iter().take(10) {
-///     println!("用户: {}, SQL: {}", sqllog.meta.username, sqllog.body);
-/// }
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
-pub fn parse_records_from_file<P>(path: P) -> (Vec<Sqllog>, Vec<ParseError>)
-where
-    P: AsRef<Path>,
-{
-    // 直接使用流式迭代器收集所有结果（内部已经使用批量并行优化）
-    let mut sqllogs = Vec::new();
-    let mut errors = Vec::new();
-
-    let path_ref = path.as_ref();
-    // 打开文件，如果失败，将 FileNotFound 作为错误返回
-    let file = match File::open(path_ref) {
-        Ok(f) => f,
-        Err(e) => {
-            errors.push(ParseError::FileNotFound {
-                path: format!("{}: {}", path_ref.display(), e),
-            });
-            return (sqllogs, errors);
-        }
-    };
-
-    // 使用 RecordParser 批量读取 Record
-    let reader = BufReader::new(file);
-    let mut record_parser = RecordParser::new(reader);
-    let mut records: Vec<Record> = Vec::new();
-    loop {
-        match record_parser.next() {
-            Some(Ok(record)) => records.push(record),
-            Some(Err(io_err)) => errors.push(ParseError::IoError(io_err.to_string())),
-            None => break,
-        }
-    }
-
-    if records.is_empty() {
-        return (sqllogs, errors);
-    }
-
-    // 并行解析
-    let results: Vec<Result<Sqllog, ParseError>> = records
-        .par_iter()
-        .map(|record| record.parse_to_sqllog())
-        .collect();
-
-    for result in results {
-        match result {
-            Ok(sqllog) => sqllogs.push(sqllog),
-            Err(err) => errors.push(err),
-        }
-    }
-
-    (sqllogs, errors)
 }

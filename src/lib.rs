@@ -34,11 +34,11 @@
 //! ### 从文件批量加载并解析为 Sqllog（自动并行处理）
 //!
 //! ```rust,no_run
-//! use dm_database_parser_sqllog::parse_records_from_file;
-//!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! // parse_records_from_file 现在直接返回 `(Vec<Sqllog>, Vec<ParseError>)`，内部自动使用并行处理
-//! let (sqllogs, errors) = parse_records_from_file("sqllog.txt");
+//! // 若需要一次性加载所有记录到内存，可从迭代器收集：
+//! let results: Vec<_> = dm_database_parser_sqllog::iter_records_from_file("sqllog.txt").collect();
+//! let sqllogs: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok().cloned()).collect();
+//! let errors: Vec<_> = results.iter().filter_map(|r| r.as_ref().err().cloned()).collect();
 //! println!("成功解析 {} 条 SQL 日志", sqllogs.len());
 //! println!("遇到 {} 个错误", errors.len());
 //!
@@ -76,7 +76,7 @@ pub use error::ParseError;
 pub use sqllog::Sqllog;
 
 // 文件解析 API
-pub use parser::{iter_records_from_file, parse_records_from_file};
+pub use parser::iter_records_from_file;
 
 #[cfg(feature = "test-helpers")]
 #[doc(hidden)]

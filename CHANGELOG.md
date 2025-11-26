@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **API 变更**：
   - `parse_records_from_file` 现在返回 `(Vec<Sqllog>, Vec<ParseError>)` 元组
+    - 在 0.4.3 中移除 `parse_records_from_file`，请使用 `iter_records_from_file` 进行流式处理，或通过 `collect()` 将迭代器转换为 Vec
   - 将部分内部函数暴露为 `pub`（通过 `__test_helpers` 模块供测试使用）
 
 - **文档更新**：
