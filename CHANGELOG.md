@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2025-11-26
+
+### Changed
+- 完善所有核心模块的库化文档注释，明确 API 用法和 feature 控制
+- 测试辅助 API 通过 feature `test-helpers` 隐藏，普通用户不可见
+- README 增加 crates.io、docs.rs、CI、feature 说明、examples 目录说明等内容
+- 代码结构进一步规范，所有内部类型和工具均不暴露给普通用户
+
+### Fixed
+- 保证所有 feature、文档、注释与 crates.io 规范一致
+- 修正部分注释和文档遗漏
+
 ## [0.4.1] - 2025-11-20
 
 ### Changed
