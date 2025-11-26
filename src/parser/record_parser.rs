@@ -76,8 +76,8 @@ impl<R: Read> RecordParser<R> {
 
         // 读取并跳过非起始行，直到找到第一个有效起始行
         loop {
-            match self.read_line()? {
-                Some(line) if is_record_start_line(&line) => return Ok(Some(line)),
+                match self.read_line()? {
+                Some(line) if crate::tools::is_probable_record_start_line(&line) => return Ok(Some(line)),
                 Some(_) => continue, // 跳过非起始行
                 None => {
                     self.finished = true;

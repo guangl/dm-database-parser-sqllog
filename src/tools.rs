@@ -132,6 +132,25 @@ pub fn is_record_start_line(line: &str) -> bool {
     validate_meta_fields_fast(meta_part)
 }
 
+/// 一个更轻量的起始行判断，用于 RecordParser 快速判定（减少重复验证）
+///
+/// 该函数仅检查时间戳和括号位置，避免对 meta 字段做完整验证。
+/// 这适用于在解析过程中作为快速筛选器，真正的字段验证仍在解析阶段进行。
+pub fn is_probable_record_start_line(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    if bytes.len() < MIN_LINE_LENGTH {
+        return false;
+    }
+    if !is_ts_millis_bytes(&bytes[0..TIMESTAMP_LENGTH]) {
+        return false;
+    }
+    if bytes[23] != SPACE_BYTE || bytes[24] != OPEN_PAREN_BYTE {
+        return false;
+    }
+    // 只需保证存在闭括号即可
+    line.find(CLOSE_PAREN_CHAR).is_some()
+}
+
 /// 快速验证 meta 字段（只验证 5 个必需字段的顺序和前缀）
 ///
 /// 使用字节级操作，比字符串操作快约 2-3 倍
