@@ -29,10 +29,7 @@ another invalid\n\
 #[test]
 fn test_iter_records_from_file_success() {
     let (_temp_dir, file_path) = create_temp_file_with_content(VALID_SINGLE_RECORD);
-    let result = iter_records_from_file(&file_path);
-    assert!(result.is_ok());
-
-    let sqllogs: Vec<_> = result.unwrap().collect();
+    let sqllogs: Vec<_> = iter_records_from_file(&file_path).collect();
     assert_eq!(sqllogs.len(), 1);
     assert!(sqllogs[0].is_ok());
 }
@@ -40,10 +37,7 @@ fn test_iter_records_from_file_success() {
 #[test]
 fn test_iter_records_from_file_multiple() {
     let (_temp_dir, file_path) = create_temp_file_with_content(VALID_MULTIPLE_RECORDS);
-    let result = iter_records_from_file(&file_path);
-    assert!(result.is_ok());
-
-    let sqllogs: Vec<_> = result.unwrap().collect();
+    let sqllogs: Vec<_> = iter_records_from_file(&file_path).collect();
     assert_eq!(sqllogs.len(), 3);
     assert!(sqllogs.iter().all(|r| r.is_ok()));
 }
@@ -51,10 +45,7 @@ fn test_iter_records_from_file_multiple() {
 #[test]
 fn test_iter_records_from_file_multiline() {
     let (_temp_dir, file_path) = create_temp_file_with_content(VALID_MULTILINE_RECORD);
-    let result = iter_records_from_file(&file_path);
-    assert!(result.is_ok());
-
-    let sqllogs: Vec<_> = result.unwrap().collect();
+    let sqllogs: Vec<_> = iter_records_from_file(&file_path).collect();
     assert_eq!(sqllogs.len(), 1);
 
     let sqllog = sqllogs[0].as_ref().unwrap();
@@ -65,26 +56,21 @@ fn test_iter_records_from_file_multiline() {
 #[test]
 fn test_iter_records_from_file_skip_invalid() {
     let (_temp_dir, file_path) = create_temp_file_with_content(MIXED_VALID_INVALID);
-    let result = iter_records_from_file(&file_path);
-    assert!(result.is_ok());
-
-    let sqllogs: Vec<_> = result.unwrap().collect();
+    let sqllogs: Vec<_> = iter_records_from_file(&file_path).collect();
     assert_eq!(sqllogs.len(), 2);
 }
 
 #[test]
 fn test_iter_records_from_file_nonexistent() {
-    let result = iter_records_from_file("nonexistent.log");
-    assert!(result.is_err());
+    let sqllogs: Vec<_> = iter_records_from_file("nonexistent.log").collect();
+    assert_eq!(sqllogs.len(), 1);
+    assert!(sqllogs[0].is_err());
 }
 
 #[test]
 fn test_parse_records_from_file_success() {
     let (_temp_dir, file_path) = create_temp_file_with_content(VALID_SINGLE_RECORD);
-    let result = parse_records_from_file(&file_path);
-    assert!(result.is_ok());
-
-    let (sqllogs, errors) = result.unwrap();
+    let (sqllogs, errors) = parse_records_from_file(&file_path);
     assert_eq!(sqllogs.len(), 1);
     assert_eq!(errors.len(), 0);
     assert_eq!(sqllogs[0].meta.username, "alice");
@@ -93,10 +79,7 @@ fn test_parse_records_from_file_success() {
 #[test]
 fn test_parse_records_from_file_multiple() {
     let (_temp_dir, file_path) = create_temp_file_with_content(VALID_MULTIPLE_RECORDS);
-    let result = parse_records_from_file(&file_path);
-    assert!(result.is_ok());
-
-    let (sqllogs, errors) = result.unwrap();
+    let (sqllogs, errors) = parse_records_from_file(&file_path);
     assert_eq!(sqllogs.len(), 3);
     assert_eq!(errors.len(), 0);
     assert_eq!(sqllogs[0].meta.username, "alice");
@@ -107,10 +90,7 @@ fn test_parse_records_from_file_multiple() {
 #[test]
 fn test_parse_records_from_file_multiline() {
     let (_temp_dir, file_path) = create_temp_file_with_content(VALID_MULTILINE_RECORD);
-    let result = parse_records_from_file(&file_path);
-    assert!(result.is_ok());
-
-    let (sqllogs, errors) = result.unwrap();
+    let (sqllogs, errors) = parse_records_from_file(&file_path);
     assert_eq!(sqllogs.len(), 1);
     assert_eq!(errors.len(), 0);
     assert!(sqllogs[0].body.contains("FROM users"));
@@ -120,26 +100,24 @@ fn test_parse_records_from_file_multiline() {
 #[test]
 fn test_parse_records_from_file_skip_invalid() {
     let (_temp_dir, file_path) = create_temp_file_with_content(MIXED_VALID_INVALID);
-    let result = parse_records_from_file(&file_path);
-    assert!(result.is_ok());
-
-    let (sqllogs, _errors) = result.unwrap();
+    let (sqllogs, _errors) = parse_records_from_file(&file_path);
     assert_eq!(sqllogs.len(), 2);
 }
 
 #[test]
 fn test_parse_records_from_file_nonexistent() {
-    let result = parse_records_from_file("nonexistent.log");
-    assert!(result.is_err());
+    let (_sqllogs, errors) = parse_records_from_file("nonexistent.log");
+    assert_eq!(errors.len(), 1);
+    match &errors[0] {
+        ParseError::FileNotFound { path: _ } => (),
+        _ => panic!("expected FileNotFound"),
+    }
 }
 
 #[test]
 fn test_parse_records_from_file_empty() {
     let (_temp_dir, file_path) = create_temp_file_with_content("");
-    let result = parse_records_from_file(&file_path);
-    assert!(result.is_ok());
-
-    let (sqllogs, errors) = result.unwrap();
+    let (sqllogs, errors) = parse_records_from_file(&file_path);
     assert_eq!(sqllogs.len(), 0);
     assert_eq!(errors.len(), 0);
 }
@@ -147,29 +125,20 @@ fn test_parse_records_from_file_empty() {
 #[test]
 fn test_iter_records_from_file_empty() {
     let (_temp_dir, file_path) = create_temp_file_with_content("");
-    let result = iter_records_from_file(&file_path);
-    assert!(result.is_ok());
-
-    let sqllogs: Vec<_> = result.unwrap().collect();
+    let sqllogs: Vec<_> = iter_records_from_file(&file_path).collect();
     assert_eq!(sqllogs.len(), 0);
 }
 
 #[test]
 fn test_parse_records_from_file_all_invalid() {
     let (_temp_dir, file_path) = create_temp_file_with_content("invalid\nlines\nonly");
-    let result = parse_records_from_file(&file_path);
-    assert!(result.is_ok());
-
-    let (sqllogs, _errors) = result.unwrap();
+    let (sqllogs, _errors) = parse_records_from_file(&file_path);
     assert_eq!(sqllogs.len(), 0);
 }
 
 #[test]
 fn test_iter_records_from_file_all_invalid() {
     let (_temp_dir, file_path) = create_temp_file_with_content("invalid\nlines\nonly");
-    let result = iter_records_from_file(&file_path);
-    assert!(result.is_ok());
-
-    let sqllogs: Vec<_> = result.unwrap().collect();
+    let sqllogs: Vec<_> = iter_records_from_file(&file_path).collect();
     assert_eq!(sqllogs.len(), 0);
 }

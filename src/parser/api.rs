@@ -30,7 +30,7 @@ use std::path::Path;
 /// ```no_run
 /// use dm_database_parser_sqllog::iter_records_from_file;
 ///
-/// let parser = iter_records_from_file("sqllog.txt")?;
+/// let parser = iter_records_from_file("sqllog.txt");
 ///
 /// let mut sqllog_count = 0;
 /// let mut error_count = 0;
@@ -52,22 +52,22 @@ use std::path::Path;
 /// println!("成功: {} 条, 错误: {} 个", sqllog_count, error_count);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub fn iter_records_from_file<P>(
-    path: P,
-) -> Result<impl Iterator<Item = Result<Sqllog, ParseError>>, ParseError>
+pub fn iter_records_from_file<P>(path: P) -> Box<dyn Iterator<Item = Result<Sqllog, ParseError>>>
 where
     P: AsRef<Path>,
 {
     let path_ref = path.as_ref();
-    let file = File::open(path_ref).map_err(|e| ParseError::FileNotFound {
-        path: format!("{}: {}", path_ref.display(), e),
-    })?;
-    let reader = BufReader::new(file);
-    let record_parser = RecordParser::new(reader);
-    // 返回一个隐藏的具体迭代器实现（crate 内部定义）
-    Ok(crate::parser::record_parser::SqllogIterator::new(
-        record_parser,
-    ))
+    match File::open(path_ref) {
+        Ok(file) => {
+            let reader = BufReader::new(file);
+            let record_parser = RecordParser::new(reader);
+            // 返回一个隐藏的具体迭代器实现（crate 内部定义）
+            Box::new(crate::parser::record_parser::SqllogIterator::new(record_parser))
+        }
+        Err(e) => Box::new(std::iter::once(Err(ParseError::FileNotFound {
+            path: format!("{}: {}", path_ref.display(), e),
+        }))),
+    }
 }
 
 /// 从文件读取并并行解析为 Sqllog（高性能版本）
@@ -95,7 +95,7 @@ where
 /// ```no_run
 /// use dm_database_parser_sqllog::parse_records_from_file;
 ///
-/// let (sqllogs, errors) = parse_records_from_file("large_log.txt")?;
+/// let (sqllogs, errors) = parse_records_from_file("large_log.txt");
 ///
 /// println!("成功解析 {} 条 SQL 日志", sqllogs.len());
 /// println!("遇到 {} 个错误", errors.len());
@@ -105,7 +105,7 @@ where
 /// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub fn parse_records_from_file<P>(path: P) -> Result<(Vec<Sqllog>, Vec<ParseError>), ParseError>
+pub fn parse_records_from_file<P>(path: P) -> (Vec<Sqllog>, Vec<ParseError>)
 where
     P: AsRef<Path>,
 {
@@ -113,12 +113,12 @@ where
     let mut sqllogs = Vec::new();
     let mut errors = Vec::new();
 
-    for result in iter_records_from_file(path)? {
+    for result in iter_records_from_file(path) {
         match result {
             Ok(sqllog) => sqllogs.push(sqllog),
             Err(err) => errors.push(err),
         }
     }
 
-    Ok((sqllogs, errors))
+    (sqllogs, errors)
 }

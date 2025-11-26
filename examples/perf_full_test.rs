@@ -13,7 +13,7 @@ fn main() {
     println!("开始解析文件（自动使用并行处理）: {}", file_path);
 
     let start = Instant::now();
-    let (sqllogs, errors) = parse_records_from_file(file_path).unwrap();
+    let (sqllogs, errors) = parse_records_from_file(file_path);
     let elapsed = start.elapsed();
 
     println!("\n=== 性能报告（并行版本） ===");

@@ -16,7 +16,7 @@ fn main() {
     let mut sqllog_count = 0;
     let mut error_count = 0;
 
-    for result in iter_records_from_file(file_path).unwrap() {
+    for result in iter_records_from_file(file_path) {
         match result {
             Ok(_sqllog) => {
                 sqllog_count += 1;

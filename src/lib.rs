@@ -17,7 +17,7 @@
 //! use dm_database_parser_sqllog::iter_records_from_file;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! for result in iter_records_from_file("sqllog.txt")? {
+//! for result in iter_records_from_file("sqllog.txt") {
 //!     match result {
 //!         Ok(sqllog) => {
 //!             println!("时间戳: {}", sqllog.ts);
@@ -37,8 +37,8 @@
 //! use dm_database_parser_sqllog::parse_records_from_file;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! // parse_records_from_file 现在直接返回 Vec<Sqllog>，内部自动使用并行处理
-//! let (sqllogs, errors) = parse_records_from_file("sqllog.txt")?;
+//! // parse_records_from_file 现在直接返回 `(Vec<Sqllog>, Vec<ParseError>)`，内部自动使用并行处理
+//! let (sqllogs, errors) = parse_records_from_file("sqllog.txt");
 //! println!("成功解析 {} 条 SQL 日志", sqllogs.len());
 //! println!("遇到 {} 个错误", errors.len());
 //!

@@ -55,7 +55,7 @@ dm-database-parser-sqllog = "0.4"
 ```rust
 use dm_database_parser_sqllog::iter_records_from_file;
 
-for result in iter_records_from_file("large_log.sqllog")? {
+for result in iter_records_from_file("large_log.sqllog") {
     match result {
         Ok(sqllog) => {
             // 处理每条日志
@@ -70,7 +70,7 @@ for result in iter_records_from_file("large_log.sqllog")? {
 ```rust
 use dm_database_parser_sqllog::parse_records_from_file;
 
-let (sqllogs, errors) = parse_records_from_file("log.sqllog")?;
+let (sqllogs, errors) = parse_records_from_file("log.sqllog");
 println!("成功解析 {} 条 SQL 日志，遇到 {} 个错误", sqllogs.len(), errors.len());
 ```
                 }
