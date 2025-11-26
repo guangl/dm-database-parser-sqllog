@@ -25,6 +25,10 @@ exclude = [
 [lib]
 name = "dm_database_parser_sqllog"
 path = "src/lib.rs"
+crate-type = ["lib"]
+
+[features]
+test-helpers = []
 
 [dependencies]
 rayon = "1.11.0"

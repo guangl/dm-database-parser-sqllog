@@ -78,8 +78,9 @@ pub use sqllog::Sqllog;
 // 文件解析 API
 pub use parser::{iter_records_from_file, parse_records_from_file};
 
-// 测试辅助 API - 仅供测试使用
+#[cfg(feature = "test-helpers")]
 #[doc(hidden)]
 pub mod __test_helpers {
+    /// 仅供测试使用的底层解析函数，普通用户无需关注。
     pub use crate::parser::parse_functions::*;
 }

@@ -15,8 +15,9 @@ pub use api::{iter_records_from_file, parse_records_from_file};
 pub use record::Record;
 pub use record_parser::RecordParser;
 
-// 测试辅助模块 - 仅在测试时导出内部函数
-#[cfg(test)]
+// 测试辅助模块 - 仅在 feature 启用时导出内部函数
+#[cfg(feature = "test-helpers")]
 pub mod test_helpers {
+    /// 仅供测试使用的底层解析函数，普通用户无需关注。
     pub use super::parse_functions::*;
 }

@@ -1,6 +1,14 @@
 //! 核心解析函数
 //!
 //! 包含了所有用于解析 SQL 日志的核心函数，如解析记录、元数据、指标等。
+//!
+//! # Feature 控制
+//!
+//! 本模块仅在启用 `test-helpers` feature 时可通过 test_helpers 访问底层解析函数。
+//!
+//! 该 feature 主要用于测试目的，允许在不暴露底层实现细节的情况下，验证解析逻辑的正确性。
+//!
+//! 默认情况下，此模块对外部不可见，以鼓励使用更高层的接口进行交互。
 
 use crate::error::ParseError;
 use crate::parser::constants::*;

@@ -1,6 +1,11 @@
 //! Record 结构定义和相关方法
 //!
 //! Record 表示一条原始的日志记录，可能包含多行（起始行 + 继续行）。
+//!
+//! # 用法说明
+//!
+//! Record 仅作为库内部结构，普通用户无需直接使用。
+//!
 
 use crate::error::ParseError;
 use crate::parser::parse_functions;

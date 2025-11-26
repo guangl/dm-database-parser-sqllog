@@ -33,128 +33,65 @@ dm-database-parser-sqllog = "0.4"
 
 对于大文件（> 100MB），推荐使用迭代器模式，内存高效（批量缓冲 + 并行处理）：
 
-```rust
+一个高性能的达梦数据库 sqllog 日志解析库，专为作为 Rust library 使用而设计，提供零分配或低分配的记录切分与解析功能。
 use dm_database_parser_sqllog::iter_records_from_file;
 
 // 迭代处理 SQL 日志（带性能统计）
-let mut total_time = 0.0;
-let mut count = 0;
-let mut slow_queries = 0;
+## 安装
+
+在你的 `Cargo.toml` 中添加依赖：
+
+```toml
+[dependencies]
+dm-database-parser-sqllog = "0.4"
+```
+                total_time += time;
+                count += 1;
+                if time > 100.0 {
+### 作为库使用
+
+#### 1. 流式迭代（推荐用于大文件）
+
+```rust
+use dm_database_parser_sqllog::iter_records_from_file;
 
 for result in iter_records_from_file("large_log.sqllog")? {
     match result {
         Ok(sqllog) => {
-            if let Some(time) = sqllog.execute_time() {
-                total_time += time;
-                count += 1;
-                if time > 100.0 {
-                    slow_queries += 1;
-                    println!("慢查询: {:.2}ms - {}", time, sqllog.body);
-                }
-            }
+            // 处理每条日志
         }
         Err(e) => eprintln!("解析错误: {}", e),
     }
 }
-
-println!("平均执行时间: {:.2}ms", total_time / count as f64);
-println!("慢查询数量: {}", slow_queries);
-
-// 使用迭代器组合器（筛选慢查询）
-let slow_queries: Vec<_> = iter_records_from_file("large_log.sqllog")?
-    .filter_map(Result::ok)  // 忽略解析错误
-    .filter(|log| log.execute_time().map_or(false, |t| t > 100.0))
-    .take(10)  // 只取前 10 条
-    .collect();
-
-println!("找到 {} 条慢查询", slow_queries.len());
 ```
 
-#### 方式二：批量加载（适合需要多次遍历）
-
-使用批量 API 可以一次性加载所有 SQL 日志，内部自动使用并行处理：
+#### 2. 批量加载（适合需要多次遍历）
 
 ```rust
 use dm_database_parser_sqllog::parse_records_from_file;
 
-// 一次性加载所有 SQL 日志（自动并行处理）
 let (sqllogs, errors) = parse_records_from_file("log.sqllog")?;
-println!("成功解析 {} 条 SQL 日志，遇到 {} 个错误", sqllogs.len(), errors.len());````
+println!("成功解析 {} 条 SQL 日志，遇到 {} 个错误", sqllogs.len(), errors.len());
 ```
-
-### 错误处理和调试
-
-所有解析错误都包含详细的原始数据，便于调试和定位问题：
-
-```rust
-use dm_database_parser_sqllog::{iter_records_from_file, ParseError};
-
-for result in iter_records_from_file("log.sqllog")? {
-    match result {
-        Ok(sqllog) => {
-            // 处理成功的记录
-        }
-        Err(e) => {
-            // 错误信息包含原始数据
-            match e {
-                ParseError::InvalidRecordStartLine { raw } => {
-                    eprintln!("无效的记录起始行: {}", raw);
-                }
-                ParseError::LineTooShort { length, raw } => {
-                    eprintln!("行太短 (长度: {}): {}", length, raw);
                 }
                 ParseError::InsufficientMetaFields { count, raw } => {
                     eprintln!("字段不足 (只有 {} 个): {}", count, raw);
-                }
-                ParseError::InvalidEpFormat { value, raw } => {
-                    eprintln!("EP 格式错误 '{}' 在: {}", value, raw);
-                }
-                ParseError::FileNotFound { path } => {
-                    eprintln!("文件未找到: {}", path);
-                }
-                _ => eprintln!("其他错误: {}", e),
-            }
-        }
-    }
-}
-```
-
-所有错误类型的 `Display` 实现都遵循格式：`错误描述 | raw: 原始数据`，例如：
-```
-invalid EP format: EPX0] | raw: EPX0] sess:123 thrd:456 user:alice trxid:0 stmt:999 appname:app
-```
-
+更多用法请参考 `examples/` 目录，所有示例均为库用法，无可执行入口。
 这使得在生产环境中快速定位问题变得更加容易。
 
 **API 对比**：
-
-| API | 返回类型 | 内存占用 | 性能 | 适用场景 |
-|-----|---------|---------|------|----------|
-| `iter_records_from_file()` | `Iterator<Item = Result<Sqllog, ParseError>>` | 低（批量缓冲） | 2.7秒 | 流式处理、需要提前中断 |
-| `parse_records_from_file()` | `(Vec<Sqllog>, Vec<ParseError>)` | 高（一次性） | 2.5秒 | 批量处理、需要多次遍历 |
-
-**选择建议**：
-- ✓ **迭代器模式** (`iter_*`)：一次只处理一条记录，支持 GB 级大文件，可使用 `.filter()`, `.take()` 等组合器
-- ✓ **一次性加载** (`parse_*`)：简单直接，适合需要多次遍历或随机访问的场景
-
-## 更多示例
-
-查看 `examples/` 目录获取更多使用示例：
-
-- `parse_example.rs` - 基本解析示例
-- `iterator_mode.rs` - 迭代器模式示例（推荐用于大文件）
-- `parse_from_file.rs` - 从文件读取和解析
-- `stream_processing.rs` - 流式处理示例
-- `using_parsers.rs` - 直接使用 RecordParser 和 SqllogParser
-- `error_messages.rs` - 错误处理示例
-- `parse_records.rs` - Record 解析示例
-- `performance_demo.rs` - 性能演示
-
-运行示例：
+## 构建与测试
 
 ```bash
-cargo run --example parse_example
-cargo run --example iterator_mode
+# 构建库
+cargo build
+
+# 运行测试
+cargo test
+
+# 生成文档
+cargo doc --open
+```
 cargo run --example parse_from_file
 cargo run --example stream_processing
 ```
