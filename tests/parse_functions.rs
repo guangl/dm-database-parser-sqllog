@@ -1,3 +1,4 @@
+#![cfg(feature = "test-helpers")]
 use dm_database_parser_sqllog::__test_helpers::*;
 use dm_database_parser_sqllog::error::ParseError;
 

@@ -4,6 +4,8 @@
 
 use crate::error::ParseError;
 use crate::parser::record_parser::RecordParser;
+use crate::parser::record::Record;
+use rayon::prelude::*;
 use crate::sqllog::Sqllog;
 use std::fs::File;
 use std::io::BufReader;
@@ -113,7 +115,41 @@ where
     let mut sqllogs = Vec::new();
     let mut errors = Vec::new();
 
-    for result in iter_records_from_file(path) {
+    let path_ref = path.as_ref();
+    // 打开文件，如果失败，将 FileNotFound 作为错误返回
+    let file = match File::open(path_ref) {
+        Ok(f) => f,
+        Err(e) => {
+            errors.push(ParseError::FileNotFound {
+                path: format!("{}: {}", path_ref.display(), e),
+            });
+            return (sqllogs, errors);
+        }
+    };
+
+    // 使用 RecordParser 批量读取 Record
+    let reader = BufReader::new(file);
+    let mut record_parser = RecordParser::new(reader);
+    let mut records: Vec<Record> = Vec::new();
+    loop {
+        match record_parser.next() {
+            Some(Ok(record)) => records.push(record),
+            Some(Err(io_err)) => errors.push(ParseError::IoError(io_err.to_string())),
+            None => break,
+        }
+    }
+
+    if records.is_empty() {
+        return (sqllogs, errors);
+    }
+
+    // 并行解析
+    let results: Vec<Result<Sqllog, ParseError>> = records
+        .par_iter()
+        .map(|record| record.parse_to_sqllog())
+        .collect();
+
+    for result in results {
         match result {
             Ok(sqllog) => sqllogs.push(sqllog),
             Err(err) => errors.push(err),
