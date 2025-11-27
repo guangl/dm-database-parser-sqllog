@@ -6,8 +6,8 @@ use crate::error::ParseError;
 use crate::parser::record::Record;
 use crate::sqllog::Sqllog;
 use crate::tools::is_record_start_line;
-use rayon::prelude::*;
 use std::collections::VecDeque;
+use crate::parser::parse_functions::parse_record;
 use std::{
     io::{self, BufRead, BufReader, Read},
     mem,
@@ -31,7 +31,7 @@ pub struct RecordParser<R: Read> {
 impl<R: Read> RecordParser<R> {
     pub fn new(reader: R) -> Self {
         Self {
-            reader: BufReader::new(reader),
+            reader: BufReader::with_capacity(64 * 1024, reader),
             buffer: String::new(),
             next_line: None,
             finished: false,
@@ -76,8 +76,10 @@ impl<R: Read> RecordParser<R> {
 
         // 读取并跳过非起始行，直到找到第一个有效起始行
         loop {
-                match self.read_line()? {
-                Some(line) if crate::tools::is_probable_record_start_line(&line) => return Ok(Some(line)),
+            match self.read_line()? {
+                Some(line) if crate::tools::is_probable_record_start_line(&line) => {
+                    return Ok(Some(line));
+                }
                 Some(_) => continue, // 跳过非起始行
                 None => {
                     self.finished = true;
@@ -151,39 +153,26 @@ impl<R: Read> SqllogIterator<R> {
         Self {
             record_parser,
             buffer: VecDeque::new(),
-            batch_size: 10000, // 每次并行处理 1万条
+            batch_size: 20000, // 每次处理 2万条，减少分配开销
         }
     }
 
-    /// 填充缓冲区：批量读取记录并并行解析
+    /// 填充缓冲区：批量读取记录并解析（串行或并行由 feature 决定）
     fn fill_buffer(&mut self) {
-        let mut records: Vec<Record> = Vec::with_capacity(self.batch_size);
-
-        // 批量读取记录
         for _ in 0..self.batch_size {
             match self.record_parser.next() {
-                Some(Ok(record)) => records.push(record),
+                Some(Ok(record)) => {
+                    // 创建一个临时 Vec<&str>（借用 record 的行数据）并解析
+                    let lines: Vec<&str> = record.lines.iter().map(|s| s.as_str()).collect();
+                    let result = parse_record(&lines);
+                    self.buffer.push_back(result);
+                }
                 Some(Err(io_err)) => {
                     self.buffer
                         .push_back(Err(ParseError::IoError(io_err.to_string())));
                 }
                 None => break,
             }
-        }
-
-        if records.is_empty() {
-            return;
-        }
-
-        // 并行解析
-        let results: Vec<Result<Sqllog, ParseError>> = records
-            .par_iter()
-            .map(|record| record.parse_to_sqllog())
-            .collect();
-
-        // 将结果放入缓冲区
-        for result in results {
-            self.buffer.push_back(result);
         }
     }
 }

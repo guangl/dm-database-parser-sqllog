@@ -87,7 +87,6 @@ impl Record {
     /// * `Ok(Sqllog)` - 解析成功
     /// * `Err(ParseError)` - 解析失败
     pub fn parse_to_sqllog(&self) -> Result<Sqllog, ParseError> {
-        let lines: Vec<&str> = self.lines.iter().map(|s| s.as_str()).collect();
-        parse_functions::parse_record(&lines)
+        parse_functions::parse_record(&self.lines)
     }
 }

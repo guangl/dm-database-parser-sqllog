@@ -35,7 +35,6 @@ harness = false
 test-helpers = []
 
 [dependencies]
-rayon = "1.11.0"
 memchr = "2.7.6"
 thiserror = "2.0.17"
 

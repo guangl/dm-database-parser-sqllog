@@ -37,12 +37,12 @@ use memchr::memchr;
 /// - `LineTooShort` - 行长度不足
 /// - `MissingClosingParen` - 缺少右括号
 /// - `InsufficientMetaFields` - Meta 字段数量不足
-pub fn parse_record(lines: &[&str]) -> Result<Sqllog, ParseError> {
+pub fn parse_record<S: AsRef<str>>(lines: &[S]) -> Result<Sqllog, ParseError> {
     if lines.is_empty() {
         return Err(ParseError::EmptyInput);
     }
 
-    let first_line = lines[0];
+    let first_line = lines[0].as_ref();
 
     // 验证第一行格式
     if !is_record_start_line(first_line) {
@@ -117,7 +117,11 @@ pub fn parse_record(lines: &[&str]) -> Result<Sqllog, ParseError> {
 ///
 /// 返回拼接后的完整 body 字符串
 #[inline]
-pub fn build_body(first_line: &str, body_start: usize, continuation_lines: &[&str]) -> String {
+pub fn build_body<S: AsRef<str>>(
+    first_line: &str,
+    body_start: usize,
+    continuation_lines: &[S],
+) -> String {
     if continuation_lines.is_empty() {
         // 只有单行，使用 String::from 略快于 to_string()
         if body_start < first_line.len() {
@@ -141,7 +145,10 @@ pub fn build_body(first_line: &str, body_start: usize, continuation_lines: &[&st
         };
 
         let total_len = first_part_len
-            + continuation_lines.iter().map(|s| s.len()).sum::<usize>()
+            + continuation_lines
+                .iter()
+                .map(|s| s.as_ref().len())
+                .sum::<usize>()
             + newline_count;
 
         let mut result = String::with_capacity(total_len);
@@ -150,14 +157,14 @@ pub fn build_body(first_line: &str, body_start: usize, continuation_lines: &[&st
             result.push_str(&first_line[body_start..]);
             for line in continuation_lines {
                 result.push('\n');
-                result.push_str(line);
+                result.push_str(line.as_ref());
             }
         } else {
             // 第一行为空，从第一个 continuation_line 开始
-            result.push_str(continuation_lines[0]);
+            result.push_str(continuation_lines[0].as_ref());
             for line in &continuation_lines[1..] {
                 result.push('\n');
-                result.push_str(line);
+                result.push_str(line.as_ref());
             }
         }
 
