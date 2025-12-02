@@ -1,4 +1,4 @@
-use dm_database_parser_sqllog::iter_records_from_file;
+use dm_database_parser_sqllog::LogParser;
 use mimalloc::MiMalloc;
 use std::env;
 use std::time::Instant;
@@ -21,11 +21,12 @@ fn main() {
     let mut errors = 0;
     let mut _bytes_processed = 0; // Approximate
 
-    for res in iter_records_from_file(path) {
+    let parser = LogParser::from_path(path).expect("Failed to create parser");
+    for res in parser.iter() {
         match res {
             Ok(log) => {
                 count += 1;
-                _bytes_processed += log.body.len(); // Very rough approximation
+                _bytes_processed += log.content_raw.len(); // Very rough approximation
             }
             Err(e) => {
                 errors += 1;

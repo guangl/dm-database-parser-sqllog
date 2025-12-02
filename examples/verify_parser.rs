@@ -1,5 +1,4 @@
-use dm_database_parser_sqllog::iter_records_from_file;
-use std::fs::File;
+use dm_database_parser_sqllog::LogParser;
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -23,7 +22,8 @@ EXECTIME: 2.5(ms) ROWCOUNT: 5(rows) EXEC_ID: 101.
 
     // 2. Parse the file
     println!("Parsing records...");
-    let records: Vec<_> = iter_records_from_file(path).collect();
+    let parser = LogParser::from_path(path)?;
+    let records: Vec<_> = parser.iter().collect();
 
     // 3. Verify results
     println!("Found {} records", records.len());
@@ -33,9 +33,9 @@ EXECTIME: 2.5(ms) ROWCOUNT: 5(rows) EXEC_ID: 101.
             Ok(sqllog) => {
                 println!("\nRecord #{}:", i + 1);
                 println!("  Timestamp: {}", sqllog.ts);
-                println!("  Meta: {:?}", sqllog.meta);
-                println!("  Body: {:?}", sqllog.body);
-                println!("  Indicators: {:?}", sqllog.indicators);
+                println!("  Meta: {:?}", sqllog.parse_meta());
+                println!("  Body: {:?}", sqllog.body());
+                println!("  Indicators: {:?}", sqllog.parse_indicators());
             }
             Err(e) => {
                 println!("\nRecord #{} Error: {}", i + 1, e);

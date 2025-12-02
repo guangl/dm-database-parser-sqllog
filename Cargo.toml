@@ -1,6 +1,6 @@
 [package]
 name = "dm-database-parser-sqllog"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 authors = ["guangl"]
 description = "一个高性能的达梦数据库 sqllog 日志解析库，提供零分配或低分配的记录切分与解析功能"
@@ -28,7 +28,9 @@ path = "src/lib.rs"
 crate-type = ["lib"]
 
 [dependencies]
+atoi = "2.0.0"
 memchr = "2.7.6"
+memmap2 = "0.9.9"
 mimalloc = "0.1.48"
 simdutf8 = "0.1.5"
 smartstring = "1.0.1"
