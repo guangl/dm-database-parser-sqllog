@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-12-02
+
+### Changed
+- **重大性能优化**：重构 `Sqllog` 结构体，实现完全惰性解析。
+  - 引入 `content_raw` 字段存储原始字节，推迟 `body` 和 `indicators` 的分割与解析。
+  - `LogIterator` 引入上下文提示（Context Hinting），大幅减少单行日志的扫描开销。
+  - 解析性能提升至 >400万条/秒（单线程）。
+- **API 变更**：
+  - `Sqllog` 的 `body` 字段变更为 `body()` 方法。
+  - `Sqllog` 的 `indicators_raw` 字段变更为 `indicators_raw()` 方法。
+  - 移除了 `Sqllog` 中的 `body` 和 `indicators_raw` 公共字段。
+
+## [0.5.0] - 2025-11-29
+
+### Changed
+- 初始性能优化版本，引入 `Cow` 实现零拷贝解析。
+
 ## [0.4.3] - 2025-11-26
 
 ### Changed

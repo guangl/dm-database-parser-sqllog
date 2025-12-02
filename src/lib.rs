@@ -14,15 +14,16 @@
 //! ### 从文件迭代处理 Sqllogs（推荐）
 //!
 //! ```rust,no_run
-//! use dm_database_parser_sqllog::iter_records_from_file;
+//! use dm_database_parser_sqllog::LogParser;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! for result in iter_records_from_file("sqllog.txt") {
+//! let parser = LogParser::from_path("sqllog.txt")?;
+//! for result in parser.iter() {
 //!     match result {
 //!         Ok(sqllog) => {
 //!             println!("时间戳: {}", sqllog.ts);
-//!             println!("用户: {}", sqllog.meta.username);
-//!             println!("SQL: {}", sqllog.body);
+//!             println!("用户: {}", sqllog.parse_meta().username);
+//!             println!("SQL: {}", sqllog.body());
 //!         }
 //!         Err(e) => eprintln!("解析错误: {}", e),
 //!     }
@@ -36,7 +37,8 @@
 //! ```rust,no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // 若需要一次性加载所有记录到内存，可从迭代器收集：
-//! let results: Vec<_> = dm_database_parser_sqllog::iter_records_from_file("sqllog.txt").collect();
+//! let parser = dm_database_parser_sqllog::LogParser::from_path("sqllog.txt")?;
+//! let results: Vec<_> = parser.iter().collect();
 //! let sqllogs: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok().cloned()).collect();
 //! let errors: Vec<_> = results.iter().filter_map(|r| r.as_ref().err().cloned()).collect();
 //! println!("成功解析 {} 条 SQL 日志", sqllogs.len());
@@ -44,7 +46,7 @@
 //!
 //! // 直接使用解析好的 Sqllog
 //! for sqllog in sqllogs {
-//!     println!("用户: {}, SQL: {}", sqllog.meta.username, sqllog.body);
+//!     println!("用户: {}, SQL: {}", sqllog.parse_meta().username, sqllog.body());
 //! }
 //! # Ok(())
 //! # }
@@ -65,22 +67,13 @@
 //! ```
 
 pub mod error;
+pub mod parser;
 pub mod sqllog;
 
 // 保留 parser 和 tools 模块作为公共模块，但不自动重导出所有内容
-pub mod parser;
 pub mod tools;
 
 // 核心类型
 pub use error::ParseError;
+pub use parser::LogParser;
 pub use sqllog::Sqllog;
-
-// 文件解析 API
-pub use parser::iter_records_from_file;
-
-#[cfg(feature = "test-helpers")]
-#[doc(hidden)]
-pub mod __test_helpers {
-    /// 仅供测试使用的底层解析函数，普通用户无需关注。
-    pub use crate::parser::parse_functions::*;
-}

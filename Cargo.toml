@@ -1,6 +1,6 @@
 [package]
 name = "dm-database-parser-sqllog"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 authors = ["guangl"]
 description = "一个高性能的达梦数据库 sqllog 日志解析库，提供零分配或低分配的记录切分与解析功能"
@@ -27,18 +27,19 @@ name = "dm_database_parser_sqllog"
 path = "src/lib.rs"
 crate-type = ["lib"]
 
-[[bench]]
-name = "parse_file_bench"
-harness = false
-
-[features]
-test-helpers = []
-
 [dependencies]
+atoi = "2.0.0"
 memchr = "2.7.6"
+memmap2 = "0.9.9"
+mimalloc = "0.1.48"
+simdutf8 = "0.1.5"
 thiserror = "2.0.17"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "plotters"] }
 tempfile = "3.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
+
+[[bench]]
+name = "parser_benchmark"
+harness = false
