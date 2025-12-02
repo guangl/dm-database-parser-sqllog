@@ -73,11 +73,13 @@ impl<'a> Sqllog<'a> {
         // 1. EXEC_ID
         let mut search_end = tail_len;
         while let Some(idx) = memrchr(b':', &search_slice[..search_end]) {
-            if idx >= 7 && &search_slice[idx - 7..idx] == b"EXEC_ID" {
-                if idx + 1 < search_slice.len() && search_slice[idx + 1] == b' ' {
-                    tail_len = idx - 7;
-                    break;
-                }
+            if idx >= 7
+                && &search_slice[idx - 7..idx] == b"EXEC_ID"
+                && idx + 1 < search_slice.len()
+                && search_slice[idx + 1] == b' '
+            {
+                tail_len = idx - 7;
+                break;
             }
             if idx == 0 {
                 break;
@@ -89,11 +91,13 @@ impl<'a> Sqllog<'a> {
         let slice_view = &search_slice[..tail_len];
         search_end = slice_view.len();
         while let Some(idx) = memrchr(b':', &slice_view[..search_end]) {
-            if idx >= 8 && &search_slice[idx - 8..idx] == b"ROWCOUNT" {
-                if idx + 1 < search_slice.len() && search_slice[idx + 1] == b' ' {
-                    tail_len = idx - 8;
-                    break;
-                }
+            if idx >= 8
+                && &search_slice[idx - 8..idx] == b"ROWCOUNT"
+                && idx + 1 < search_slice.len()
+                && search_slice[idx + 1] == b' '
+            {
+                tail_len = idx - 8;
+                break;
             }
             if idx == 0 {
                 break;
@@ -105,11 +109,13 @@ impl<'a> Sqllog<'a> {
         let slice_view = &search_slice[..tail_len];
         search_end = slice_view.len();
         while let Some(idx) = memrchr(b':', &slice_view[..search_end]) {
-            if idx >= 8 && &search_slice[idx - 8..idx] == b"EXECTIME" {
-                if idx + 1 < search_slice.len() && search_slice[idx + 1] == b' ' {
-                    tail_len = idx - 8;
-                    break;
-                }
+            if idx >= 8
+                && &search_slice[idx - 8..idx] == b"EXECTIME"
+                && idx + 1 < search_slice.len()
+                && search_slice[idx + 1] == b' '
+            {
+                tail_len = idx - 8;
+                break;
             }
             if idx == 0 {
                 break;
@@ -154,28 +160,28 @@ impl<'a> Sqllog<'a> {
         // "EXECTIME: 1.0(ms) ROWCOUNT: 1(rows) EXEC_ID: 100."
 
         // Parse EXECTIME
-        if let Some(idx) = memchr::memmem::find(bytes, b"EXECTIME:") {
-            if let Some(end) = memchr(b'(', &bytes[idx..]) {
-                let val_bytes = &bytes[idx + 9..idx + end]; // 9 is len of "EXECTIME:"
-                let val_trimmed = trim(val_bytes);
-                // unsafe is fine as we trust the source from parser
-                let s = unsafe { std::str::from_utf8_unchecked(val_trimmed) };
-                if let Ok(time) = s.parse::<f32>() {
-                    indicators.execute_time = time;
-                    has_indicators = true;
-                }
+        if let Some(idx) = memchr::memmem::find(bytes, b"EXECTIME:")
+            && let Some(end) = memchr(b'(', &bytes[idx..])
+        {
+            let val_bytes = &bytes[idx + 9..idx + end]; // 9 is len of "EXECTIME:"
+            let val_trimmed = trim(val_bytes);
+            // unsafe is fine as we trust the source from parser
+            let s = unsafe { std::str::from_utf8_unchecked(val_trimmed) };
+            if let Ok(time) = s.parse::<f32>() {
+                indicators.execute_time = time;
+                has_indicators = true;
             }
         }
 
         // Parse ROWCOUNT
-        if let Some(idx) = memchr::memmem::find(bytes, b"ROWCOUNT:") {
-            if let Some(end) = memchr(b'(', &bytes[idx..]) {
-                let val_bytes = &bytes[idx + 9..idx + end];
-                let val_trimmed = trim(val_bytes);
-                if let Some(count) = atoi::<u32>(val_trimmed) {
-                    indicators.row_count = count;
-                    has_indicators = true;
-                }
+        if let Some(idx) = memchr::memmem::find(bytes, b"ROWCOUNT:")
+            && let Some(end) = memchr(b'(', &bytes[idx..])
+        {
+            let val_bytes = &bytes[idx + 9..idx + end];
+            let val_trimmed = trim(val_bytes);
+            if let Some(count) = atoi::<u32>(val_trimmed) {
+                indicators.row_count = count;
+                has_indicators = true;
             }
         }
 

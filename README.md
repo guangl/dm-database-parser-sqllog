@@ -3,13 +3,15 @@
 [![Crates.io](https://img.shields.io/crates/v/dm-database-parser-sqllog.svg)](https://crates.io/crates/dm-database-parser-sqllog)
 [![Documentation](https://docs.rs/dm-database-parser-sqllog/badge.svg)](https://docs.rs/dm-database-parser-sqllog)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-94.07%25-brightgreen.svg)](docs/COVERAGE.md)
+[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A5%2090%25-brightgreen.svg)](docs/COVERAGE.md)
 
 一个高性能的达梦数据库 sqllog 日志解析库，提供零分配或低分配的记录切分与解析功能。
 
 ## 主要特点
 
-- **零分配解析**：基于时间戳的记录切分，使用流式 API 避免额外内存分配
+- **零分配解析**：基于时间戳的记录切分，使用流式 API 和 `Cow` 类型避免额外内存分配
+- **完全惰性解析**：仅在需要时解析 SQL 正文和性能指标，大幅提升扫描速度
+- **极致性能**：单线程处理速度超过 400 万条/秒（>1GB/s）
 - **轻量级结构**：解析结果使用引用（`&str`），避免不必要的字符串复制
 - **详细的错误信息**：所有解析错误都包含原始数据，便于调试和问题定位
 
@@ -19,21 +21,26 @@
 
 ```toml
 [dependencies]
-dm-database-parser-sqllog = "0.4"
+dm-database-parser-sqllog = "0.6"
 ```
 
 ### 作为库使用
 
 ```rust
-use dm_database_parser_sqllog::iter_records_from_file;
+use dm_database_parser_sqllog::LogParser;
 
-for result in iter_records_from_file("large_log.sqllog") {
-    match result {
-        Ok(sqllog) => {
-            // 处理每条日志
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let parser = LogParser::from_path("large_log.sqllog")?;
+    for result in parser.iter() {
+        match result {
+            Ok(sqllog) => {
+                // 处理每条日志
+                println!("SQL: {}", sqllog.body());
+            }
+            Err(e) => eprintln!("解析错误: {}", e),
         }
-        Err(e) => eprintln!("解析错误: {}", e),
     }
+    Ok(())
 }
 ```
 
@@ -52,13 +59,43 @@ cargo test
 cargo doc --open
 ```
 
+### 覆盖率 ≥ 90%（已在 CI 强制）
+
+本仓库使用 `cargo-llvm-cov` 统计并卡住覆盖率下限为 90%。本地运行：
+
+```powershell
+# 安装 cargo-llvm-cov（一次性）
+cargo install cargo-llvm-cov
+
+# 运行并在达不到 90% 时失败
+cargo llvm-cov --workspace --all-features --fail-under-lines 90
+```
+
+### 基准作为性能基线（已在 CI 强制）
+
+我们将 Criterion 基准的当前结果作为“性能基线”。任何改动不得慢于该基线（容忍度默认 0%）。
+
+首次或更新基线（会运行基准并写入 `benchmarks/baseline.json`）：
+
+```powershell
+pwsh ./scripts/export_criterion_baseline.ps1
+```
+
+对比当前实现与基线（慢于基线将退出码 1）：
+
+```powershell
+pwsh ./scripts/check_criterion_against_baseline.ps1 -Baseline 'benchmarks/baseline.json' -TolerancePercent 0
+```
+
+CI 中已在 Windows 上执行上述校验以避免环境差异导致波动。
+
 ## API 文档
 
 完整的 API 文档请查看 [docs.rs](https://docs.rs/dm-database-parser-sqllog)。
 
 ### 文件解析 API（推荐）
 
-- [`iter_records_from_file`] - 从文件流式读取 SQL 日志，返回一个迭代器（内存高效，批量缓冲 + 并行处理）
+- [`LogParser`] - 从文件流式读取 SQL 日志，返回一个迭代器（内存映射 + 零拷贝）
 
 ### 核心类型
 
@@ -68,54 +105,25 @@ cargo doc --open
 ## 设计与注意事项
 
 - 所有 API 都直接返回解析好的 `Sqllog`，无需手动调用解析方法
-- 自动使用批量缓冲 + 并行处理优化性能
-- 适合处理大型日志文件（1GB 文件约 2.5 秒）
+- 采用内存映射 (mmap) 技术，适合处理大型日志文件（1GB 文件 < 1 秒）
 - 流式 API 内存占用低，适合超大文件或需要提前中断的场景
+- `body()` 和 `indicators_raw()` 方法采用惰性求值，仅在调用时进行分割和 UTF-8 转换
 
 ## 测试
 
 本项目包含了全面的测试套件:
 
-- **107 个测试用例**: 78 个集成测试 + 29 个单元测试
-- **50+ 个基准场景**: 使用 Criterion.rs 进行性能基准测试
+- **集成测试**: `tests/` 目录下的集成测试覆盖了常见场景
+- **Benchmark 测试**: 使用 Criterion.rs 进行性能基准测试，确保高性能
 - **100% 通过率**: 所有测试当前状态均为通过
-- **94.69% 代码覆盖率**: 行覆盖率,函数覆盖率达 98.80%
 
 ### 测试结构
 
 **集成测试** (`tests/` 目录):
-- `api.rs` - API 函数测试 (14 tests)
-- `record.rs` - Record 结构测试 (9 tests)
-- `record_parser.rs` - RecordParser 迭代器测试 (9 tests)
-- `parse_functions.rs` - 核心解析函数测试 (46 tests)
-
-**单元测试** (源码中):
-- `sqllog.rs` - Sqllog 结构体测试 (8 tests)
-- `tools.rs` - 工具函数测试 (21 tests)
+- `integration_test.rs` - 核心功能集成测试
 
 **Benchmark 测试** (`benches/` 目录):
-- `parse_file_bench.rs` - API 函数性能测试
-
-### 测试覆盖率
-
-**当前覆盖率: 94.69%** ✅
-
-| 模块 | 行覆盖率 | 函数覆盖率 |
-|------|----------|------------|
-| parser/api.rs | 89.66% | 100.00% |
-| parser/parse_functions.rs | 90.71% | 95.65% |
-| parser/record.rs | 100.00% | 100.00% |
-| parser/record_parser.rs | 96.72% | 100.00% |
-| sqllog.rs | 100.00% | 100.00% |
-| tools.rs | 96.07% | 100.00% |
-
-覆盖功能:
-- ✅ 所有解析函数(parse_record, parse_meta, parse_indicators)
-- ✅ 所有错误路径和边界情况
-- ✅ 流式 API
-- ✅ 多行记录处理
-- ✅ Windows/Unix 换行符兼容
-- ✅ 大数据集处理(1GB+ 文件)
+- `parser_benchmark.rs` - 解析器性能测试
 
 ## 许可证
 
