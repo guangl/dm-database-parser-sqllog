@@ -9,16 +9,6 @@
 // 时间戳格式常量
 const TIMESTAMP_LENGTH: usize = 23;
 const MIN_LINE_LENGTH: usize = 25;
-const TIMESTAMP_SEPARATOR_POSITIONS: [(usize, u8); 6] = [
-    (4, b'-'),
-    (7, b'-'),
-    (10, b' '),
-    (13, b':'),
-    (16, b':'),
-    (19, b'.'),
-];
-const TIMESTAMP_DIGIT_POSITIONS: [usize; 17] =
-    [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 20, 21, 22];
 
 // 预定义的字节常量，避免重复创建
 const SPACE_BYTE: u8 = b' ';
@@ -54,21 +44,38 @@ pub fn is_ts_millis_bytes(bytes: &[u8]) -> bool {
         return false;
     }
 
-    // 检查分隔符位置
-    for &(pos, expected) in &TIMESTAMP_SEPARATOR_POSITIONS {
-        if bytes[pos] != expected {
-            return false;
-        }
+    // Check separators
+    if bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b' '
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+        || bytes[19] != b'.'
+    {
+        return false;
     }
 
-    // 检查数字位置
-    for &i in &TIMESTAMP_DIGIT_POSITIONS {
-        if !bytes[i].is_ascii_digit() {
-            return false;
-        }
-    }
+    // Check digits
+    // 0-3, 5-6, 8-9, 11-12, 14-15, 17-18, 20-22
+    let is_digit = |b: u8| b.is_ascii_digit();
 
-    true
+    is_digit(bytes[0])
+        && is_digit(bytes[1])
+        && is_digit(bytes[2])
+        && is_digit(bytes[3])
+        && is_digit(bytes[5])
+        && is_digit(bytes[6])
+        && is_digit(bytes[8])
+        && is_digit(bytes[9])
+        && is_digit(bytes[11])
+        && is_digit(bytes[12])
+        && is_digit(bytes[14])
+        && is_digit(bytes[15])
+        && is_digit(bytes[17])
+        && is_digit(bytes[18])
+        && is_digit(bytes[20])
+        && is_digit(bytes[21])
+        && is_digit(bytes[22])
 }
 
 /// 判断一行日志是否为记录起始行

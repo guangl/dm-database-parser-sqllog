@@ -65,22 +65,13 @@
 //! ```
 
 pub mod error;
+pub mod parser;
 pub mod sqllog;
 
 // 保留 parser 和 tools 模块作为公共模块，但不自动重导出所有内容
-pub mod parser;
 pub mod tools;
 
 // 核心类型
 pub use error::ParseError;
-pub use sqllog::Sqllog;
-
-// 文件解析 API
 pub use parser::iter_records_from_file;
-
-#[cfg(feature = "test-helpers")]
-#[doc(hidden)]
-pub mod __test_helpers {
-    /// 仅供测试使用的底层解析函数，普通用户无需关注。
-    pub use crate::parser::parse_functions::*;
-}
+pub use sqllog::Sqllog;
