@@ -7,7 +7,7 @@ fn benchmark_parser(c: &mut Criterion) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut path = root.clone();
     path.push("sqllogs");
-    path.push("dmsql_OA01_20251117_160941.log");
+    path.push("dmsql_DSC0_20250812_092516.log");
 
     // Ensure the file exists
     if !path.exists() {

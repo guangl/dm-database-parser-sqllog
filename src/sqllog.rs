@@ -39,6 +39,19 @@ impl<'a> Sqllog<'a> {
         }
     }
 
+    /// 获取 SQL 语句体的长度（不做 UTF-8 校验，不分配）
+    #[inline]
+    pub fn body_len(&self) -> usize {
+        self.find_indicators_split()
+    }
+
+    /// 获取 SQL 语句体的原始字节切片（不分配）
+    #[inline]
+    pub fn body_bytes(&self) -> &[u8] {
+        let split = self.find_indicators_split();
+        &self.content_raw[..split]
+    }
+
     /// 获取原始性能指标字符串（延迟分割）
     pub fn indicators_raw(&self) -> Option<Cow<'a, str>> {
         let split = self.find_indicators_split();
@@ -128,73 +141,82 @@ impl<'a> Sqllog<'a> {
 
     /// 解析性能指标
     pub fn parse_indicators(&self) -> Option<IndicatorsParts> {
-        let raw_cow = self.indicators_raw()?;
-        let raw = raw_cow.as_ref();
-        let bytes = raw.as_bytes();
-
-        // We need to parse the indicators from the raw string.
-        // The format is "EXECTIME: ... ROWCOUNT: ... EXEC_ID: ..."
-        // But the order might vary or some might be missing?
-        // The parser logic in parser.rs handled this by searching backwards.
-        // We should duplicate that logic here or move it here.
-        // Since we want to keep parser.rs focused on splitting, let's implement parsing here.
+        let split = self.find_indicators_split();
+        let indicators_bytes = &self.content_raw[split..];
+        if indicators_bytes.is_empty() {
+            return None;
+        }
 
         let mut indicators = IndicatorsParts::default();
         let mut has_indicators = false;
 
-        // Helper to trim
-        fn trim(b: &[u8]) -> &[u8] {
-            let start = b
-                .iter()
-                .position(|&x| !x.is_ascii_whitespace())
-                .unwrap_or(0);
-            let end = b
-                .iter()
-                .rposition(|&x| !x.is_ascii_whitespace())
-                .map(|i| i + 1)
-                .unwrap_or(start);
-            &b[start..end]
-        }
-
-        // We can use a simple forward scan or regex-like search since we have the isolated string.
-        // "EXECTIME: 1.0(ms) ROWCOUNT: 1(rows) EXEC_ID: 100."
-
         // Parse EXECTIME
-        if let Some(idx) = memchr::memmem::find(bytes, b"EXECTIME:")
-            && let Some(end) = memchr(b'(', &bytes[idx..])
-        {
-            let val_bytes = &bytes[idx + 9..idx + end]; // 9 is len of "EXECTIME:"
-            let val_trimmed = trim(val_bytes);
-            // unsafe is fine as we trust the source from parser
-            let s = unsafe { std::str::from_utf8_unchecked(val_trimmed) };
-            if let Ok(time) = s.parse::<f32>() {
-                indicators.execute_time = time;
-                has_indicators = true;
+        if let Some(idx) = memchr::memmem::find(indicators_bytes, b"EXECTIME:") {
+            // Find '(' after EXECTIME:
+            let search_start = idx + 9;
+            if let Some(paren_idx) = memchr(b'(', &indicators_bytes[search_start..]) {
+                let val_bytes = &indicators_bytes[search_start..search_start + paren_idx];
+                // Trim manually for speed
+                let mut start = 0;
+                let mut end = val_bytes.len();
+                while start < end && val_bytes[start] == b' ' {
+                    start += 1;
+                }
+                while end > start && val_bytes[end - 1] == b' ' {
+                    end -= 1;
+                }
+                if start < end {
+                    let s = unsafe { std::str::from_utf8_unchecked(&val_bytes[start..end]) };
+                    if let Ok(time) = s.parse::<f32>() {
+                        indicators.execute_time = time;
+                        has_indicators = true;
+                    }
+                }
             }
         }
 
         // Parse ROWCOUNT
-        if let Some(idx) = memchr::memmem::find(bytes, b"ROWCOUNT:")
-            && let Some(end) = memchr(b'(', &bytes[idx..])
-        {
-            let val_bytes = &bytes[idx + 9..idx + end];
-            let val_trimmed = trim(val_bytes);
-            if let Some(count) = atoi::<u32>(val_trimmed) {
-                indicators.row_count = count;
-                has_indicators = true;
+        if let Some(idx) = memchr::memmem::find(indicators_bytes, b"ROWCOUNT:") {
+            let search_start = idx + 9;
+            if let Some(paren_idx) = memchr(b'(', &indicators_bytes[search_start..]) {
+                let val_bytes = &indicators_bytes[search_start..search_start + paren_idx];
+                let mut start = 0;
+                let mut end = val_bytes.len();
+                while start < end && val_bytes[start] == b' ' {
+                    start += 1;
+                }
+                while end > start && val_bytes[end - 1] == b' ' {
+                    end -= 1;
+                }
+                if start < end {
+                    if let Some(count) = atoi::<u32>(&val_bytes[start..end]) {
+                        indicators.row_count = count;
+                        has_indicators = true;
+                    }
+                }
             }
         }
 
         // Parse EXEC_ID
-        if let Some(idx) = memchr::memmem::find(bytes, b"EXEC_ID:") {
-            // Ends with . or end of string
-            let suffix = &bytes[idx + 8..];
-            let end = memchr(b'.', suffix).unwrap_or(suffix.len());
-            let val_bytes = &suffix[..end];
-            let val_trimmed = trim(val_bytes);
-            if let Some(id) = atoi::<i64>(val_trimmed) {
-                indicators.execute_id = id;
-                has_indicators = true;
+        if let Some(idx) = memchr::memmem::find(indicators_bytes, b"EXEC_ID:") {
+            let search_start = idx + 8;
+            let end = memchr(b'.', &indicators_bytes[search_start..])
+                .map(|i| search_start + i)
+                .unwrap_or(indicators_bytes.len());
+            let val_bytes = &indicators_bytes[search_start..end];
+            let mut start = 0;
+            let mut trimmed_end = val_bytes.len();
+            while start < trimmed_end && val_bytes[start] == b' ' {
+                start += 1;
+            }
+            while trimmed_end > start && val_bytes[trimmed_end - 1] == b' ' {
+                trimmed_end -= 1;
+            }
+            if start < trimmed_end {
+                if let Some(id) = atoi::<i64>(&val_bytes[start..trimmed_end]) {
+                    indicators.execute_id = id;
+                    has_indicators = true;
+                }
             }
         }
 
@@ -209,125 +231,89 @@ impl<'a> Sqllog<'a> {
     pub fn parse_meta(&self) -> MetaParts<'a> {
         let meta_bytes = self.meta_raw.as_bytes();
         let mut meta = MetaParts::default();
-        let mut idx = 0;
         let len = meta_bytes.len();
 
+        // Determine if we're working with borrowed or owned data once
+        let is_borrowed = matches!(&self.meta_raw, Cow::Borrowed(_));
+
+        // Fast path: single pass through meta_bytes with manual tokenization
+        let mut idx = 0;
         while idx < len {
             // Skip whitespace
-            while idx < len && meta_bytes[idx].is_ascii_whitespace() {
+            while idx < len && meta_bytes[idx] == b' ' {
                 idx += 1;
             }
             if idx >= len {
                 break;
             }
 
+            // Find token end
             let start = idx;
-            // Find end of token using memchr for space (optimization)
-            let end = match memchr(b' ', &meta_bytes[idx..]) {
-                Some(i) => idx + i,
-                None => len,
-            };
+            while idx < len && meta_bytes[idx] != b' ' {
+                idx += 1;
+            }
+            let part = &meta_bytes[start..idx];
 
-            let part = &meta_bytes[start..end];
-            idx = end;
-
-            if part.starts_with(b"EP[") && part.ends_with(b"]") {
-                // EP[0]
-                let num_bytes = &part[3..part.len() - 1];
-                if let Some(ep) = atoi::<u8>(num_bytes) {
+            // Parse EP[n]
+            if part.len() > 4
+                && part[0] == b'E'
+                && part[1] == b'P'
+                && part[2] == b'['
+                && part[part.len() - 1] == b']'
+            {
+                if let Some(ep) = atoi::<u8>(&part[3..part.len() - 1]) {
                     meta.ep = ep;
                 }
                 continue;
             }
 
-            if let Some(sep_idx) = memchr(b':', part) {
-                let key = &part[0..sep_idx];
-                let val = &part[sep_idx + 1..];
+            // Find ':'
+            if let Some(sep) = memchr(b':', part) {
+                let key = &part[..sep];
+                let val = &part[sep + 1..];
 
-                // Helper to convert bytes to Cow using unsafe for known ASCII keys
-                let to_cow_trusted = |bytes: &[u8]| -> Cow<'a, str> {
-                    // We need to extend the lifetime of bytes to 'a.
-                    // Since meta_raw is Cow<'a, str>, if it's Borrowed, the bytes are &'a [u8].
-                    // If it's Owned, we can't return Cow::Borrowed referencing it easily without unsafe.
-                    // But wait, self.meta_raw is Cow<'a, str>.
-                    // If self.meta_raw is Borrowed(&'a str), then bytes are from that slice, so they are &'a [u8].
-                    // If self.meta_raw is Owned(String), then bytes are from that String. We can't return Cow::Borrowed(&'a str) pointing to it.
-
-                    // This is the tricky part of lazy parsing with Cow.
-                    // If we have Owned data, we must return Owned data or clone.
-                    // But parse_meta returns MetaParts<'a>.
-
-                    // If self.meta_raw is Borrowed, we can return Borrowed.
-                    // If self.meta_raw is Owned, we MUST return Owned.
-
-                    match &self.meta_raw {
-                        Cow::Borrowed(_) => unsafe {
-                            // Reconstruct the lifetime 'a
-                            // We know bytes points into self.meta_raw which is 'a
-                            let ptr = bytes.as_ptr();
-                            let len = bytes.len();
-                            let slice = std::slice::from_raw_parts(ptr, len);
-                            Cow::Borrowed(std::str::from_utf8_unchecked(slice))
-                        },
-                        Cow::Owned(_) => {
-                            // We must allocate
-                            unsafe { Cow::Owned(std::str::from_utf8_unchecked(bytes).to_string()) }
-                        }
-                    }
-                };
-
+                // Fast conversion: no validation, direct unsafe cast
                 let to_cow = |bytes: &[u8]| -> Cow<'a, str> {
-                    match &self.meta_raw {
-                        Cow::Borrowed(_) => match simd_from_utf8(bytes) {
-                            Ok(_) => unsafe {
-                                let ptr = bytes.as_ptr();
-                                let len = bytes.len();
-                                let slice = std::slice::from_raw_parts(ptr, len);
-                                Cow::Borrowed(std::str::from_utf8_unchecked(slice))
-                            },
-                            Err(_) => Cow::Owned(String::from_utf8_lossy(bytes).into_owned()),
-                        },
-                        Cow::Owned(_) => match simd_from_utf8(bytes) {
-                            Ok(s) => Cow::Owned(s.to_string()),
-                            Err(_) => Cow::Owned(String::from_utf8_lossy(bytes).into_owned()),
-                        },
+                    if is_borrowed {
+                        unsafe {
+                            Cow::Borrowed(std::str::from_utf8_unchecked(
+                                std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()),
+                            ))
+                        }
+                    } else {
+                        unsafe { Cow::Owned(std::str::from_utf8_unchecked(bytes).to_string()) }
                     }
                 };
 
                 match key {
-                    b"sess" => meta.sess_id = to_cow_trusted(val),
-                    b"thrd" => meta.thrd_id = to_cow_trusted(val),
+                    b"sess" => meta.sess_id = to_cow(val),
+                    b"thrd" => meta.thrd_id = to_cow(val),
                     b"user" => meta.username = to_cow(val),
-                    b"trxid" => meta.trxid = to_cow_trusted(val),
-                    b"stmt" => meta.statement = to_cow_trusted(val),
+                    b"trxid" => meta.trxid = to_cow(val),
+                    b"stmt" => meta.statement = to_cow(val),
+                    b"ip" => meta.client_ip = to_cow(val),
                     b"appname" => {
-                        if val.is_empty() {
-                            let mut next_idx = idx;
-                            while next_idx < len && meta_bytes[next_idx].is_ascii_whitespace() {
-                                next_idx += 1;
+                        if !val.is_empty() {
+                            meta.appname = to_cow(val);
+                        } else {
+                            // Peek next token
+                            let mut peek_idx = idx;
+                            while peek_idx < len && meta_bytes[peek_idx] == b' ' {
+                                peek_idx += 1;
                             }
-                            if next_idx < len {
-                                let next_start = next_idx;
-                                let next_end = match memchr(b' ', &meta_bytes[next_idx..]) {
-                                    Some(i) => next_idx + i,
-                                    None => len,
-                                };
-                                let next_part = &meta_bytes[next_start..next_end];
-
-                                if next_part.starts_with(b"ip:") && !next_part.starts_with(b"ip::")
+                            if peek_idx < len {
+                                let peek_start = peek_idx;
+                                while peek_idx < len && meta_bytes[peek_idx] != b' ' {
+                                    peek_idx += 1;
+                                }
+                                let next_part = &meta_bytes[peek_start..peek_idx];
+                                if !next_part.starts_with(b"ip:") || next_part.starts_with(b"ip::")
                                 {
-                                    // Next part is ip key
-                                } else {
                                     meta.appname = to_cow(next_part);
-                                    idx = next_end;
+                                    idx = peek_idx;
                                 }
                             }
-                        } else {
-                            meta.appname = to_cow(val);
                         }
-                    }
-                    b"ip" => {
-                        meta.client_ip = to_cow_trusted(val);
                     }
                     _ => {}
                 }
