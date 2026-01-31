@@ -33,6 +33,7 @@ memchr = "2.7.6"
 memmap2 = "0.9.9"
 simdutf8 = "0.1.5"
 thiserror = "2.0.17"
+encoding = "0.2"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "plotters"] }
