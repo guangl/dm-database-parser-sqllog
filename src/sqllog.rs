@@ -1,4 +1,7 @@
 use atoi::atoi;
+use encoding::DecoderTrap;
+use encoding::Encoding;
+use encoding::all::GB18030;
 use memchr::{memchr, memrchr};
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
@@ -7,7 +10,7 @@ use std::borrow::Cow;
 ///
 /// 表示一条完整的 SQL 日志记录，包含时间戳、元数据、SQL 语句体和可选的性能指标。
 ///
-
+///
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Sqllog<'a> {
     /// 时间戳，格式为 "YYYY-MM-DD HH:MM:SS.mmm"
@@ -18,6 +21,9 @@ pub struct Sqllog<'a> {
 
     /// 原始内容（包含 Body 和 Indicators），延迟分割和解析
     pub content_raw: Cow<'a, [u8]>,
+
+    /// 文件级编码 hint（由 parser 探测），用于正确解码 content
+    pub encoding: crate::parser::FileEncodingHint,
 }
 
 impl<'a> Sqllog<'a> {
@@ -25,17 +31,29 @@ impl<'a> Sqllog<'a> {
     pub fn body(&self) -> Cow<'a, str> {
         let split = self.find_indicators_split();
         let body_bytes = &self.content_raw[..split];
-        match simd_from_utf8(body_bytes) {
-            Ok(s) => match &self.content_raw {
-                Cow::Borrowed(_) => unsafe {
-                    let ptr = body_bytes.as_ptr();
-                    let len = body_bytes.len();
-                    let slice = std::slice::from_raw_parts(ptr, len);
-                    Cow::Borrowed(std::str::from_utf8_unchecked(slice))
-                },
-                Cow::Owned(_) => Cow::Owned(s.to_string()),
-            },
-            Err(_) => Cow::Owned(String::from_utf8_lossy(body_bytes).into_owned()),
+
+        match self.encoding {
+            crate::parser::FileEncodingHint::Utf8 | crate::parser::FileEncodingHint::Auto => {
+                match simd_from_utf8(body_bytes) {
+                    Ok(s) => match &self.content_raw {
+                        Cow::Borrowed(_) => unsafe {
+                            let ptr = body_bytes.as_ptr();
+                            let len = body_bytes.len();
+                            let slice = std::slice::from_raw_parts(ptr, len);
+                            Cow::Borrowed(std::str::from_utf8_unchecked(slice))
+                        },
+                        Cow::Owned(_) => Cow::Owned(s.to_string()),
+                    },
+                    Err(_) => Cow::Owned(String::from_utf8_lossy(body_bytes).into_owned()),
+                }
+            }
+            crate::parser::FileEncodingHint::Gb18030 => {
+                // Decode using GB18030 and return owned string
+                match GB18030.decode(body_bytes, DecoderTrap::Strict) {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => Cow::Owned(String::from_utf8_lossy(body_bytes).into_owned()),
+                }
+            }
         }
     }
 
@@ -59,18 +77,31 @@ impl<'a> Sqllog<'a> {
         if indicators_bytes.is_empty() {
             return None;
         }
-        match &self.content_raw {
-            Cow::Borrowed(_) => unsafe {
-                let ptr = indicators_bytes.as_ptr();
-                let len = indicators_bytes.len();
-                let slice = std::slice::from_raw_parts(ptr, len);
-                Some(Cow::Borrowed(std::str::from_utf8_unchecked(slice)))
-            },
-            Cow::Owned(_) => unsafe {
-                Some(Cow::Owned(
-                    std::str::from_utf8_unchecked(indicators_bytes).to_string(),
-                ))
-            },
+
+        match self.encoding {
+            crate::parser::FileEncodingHint::Utf8 | crate::parser::FileEncodingHint::Auto => {
+                match &self.content_raw {
+                    Cow::Borrowed(_) => unsafe {
+                        let ptr = indicators_bytes.as_ptr();
+                        let len = indicators_bytes.len();
+                        let slice = std::slice::from_raw_parts(ptr, len);
+                        Some(Cow::Borrowed(std::str::from_utf8_unchecked(slice)))
+                    },
+                    Cow::Owned(_) => unsafe {
+                        Some(Cow::Owned(
+                            std::str::from_utf8_unchecked(indicators_bytes).to_string(),
+                        ))
+                    },
+                }
+            }
+            crate::parser::FileEncodingHint::Gb18030 => {
+                match GB18030.decode(indicators_bytes, DecoderTrap::Strict) {
+                    Ok(s) => Some(Cow::Owned(s)),
+                    Err(_) => Some(Cow::Owned(
+                        String::from_utf8_lossy(indicators_bytes).into_owned(),
+                    )),
+                }
+            }
         }
     }
 
@@ -307,7 +338,9 @@ impl<'a> Sqllog<'a> {
                                     peek_idx += 1;
                                 }
                                 let next_part = &meta_bytes[peek_start..peek_idx];
-                                if !next_part.starts_with(b"ip:") || next_part.starts_with(b"ip::")
+                                // If the next token is an ip (single or double/triple colon forms), do NOT treat it as appname
+                                if !(next_part.starts_with(b"ip:")
+                                    || next_part.starts_with(b"ip::"))
                                 {
                                     meta.appname = to_cow(next_part);
                                     idx = peek_idx;
@@ -321,51 +354,47 @@ impl<'a> Sqllog<'a> {
         }
         meta
     }
-}
 
-/// 元数据部分
-///
-/// 包含日志记录的所有元数据字段，如会话 ID、用户名等。
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct MetaParts<'a> {
-    /// EP（Execution Point）编号，范围 0-255
-    pub ep: u8,
+    /// 元数据部分
+    ///
+    /// 包含日志记录的所有元数据字段，如会话 ID、用户名等。
+    #[derive(Debug, Clone, PartialEq, Default)]
+    pub struct MetaParts<'a> {
+        /// EP（Execution Point）编号，范围 0-255
+        pub ep: u8,
 
-    /// 会话 ID
-    pub sess_id: Cow<'a, str>,
+        /// 会话 ID
+        pub sess_id: Cow<'a, str>,
 
-    /// 线程 ID
-    pub thrd_id: Cow<'a, str>,
+        /// 线程 ID
+        pub thrd_id: Cow<'a, str>,
 
-    /// 用户名
-    pub username: Cow<'a, str>,
+        /// 用户名
+        pub username: Cow<'a, str>,
 
-    /// 事务 ID
-    pub trxid: Cow<'a, str>,
+        /// 事务 ID
+        pub trxid: Cow<'a, str>,
 
-    /// 语句 ID
-    pub statement: Cow<'a, str>,
+        /// 语句 ID
+        pub statement: Cow<'a, str>,
 
-    /// 应用程序名称
-    pub appname: Cow<'a, str>,
+        /// 应用程序名称
+        pub appname: Cow<'a, str>,
 
-    /// 客户端 IP 地址（可选）
-    pub client_ip: Cow<'a, str>,
-}
+        /// 客户端 IP 地址（可选）
+        pub client_ip: Cow<'a, str>,
+    }
 
-/// 性能指标部分
-///
-/// 包含 SQL 执行的性能指标，如执行时间、影响行数等。
-///
+    /// 性能指标部分
+    ///
+    /// 包含 SQL 执行的性能指标，如执行时间、影响行数等。
+    ///
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct IndicatorsParts {
-    /// 执行时间（毫秒）
-    pub execute_time: f32,
+    #[derive(Debug, Clone, Copy, PartialEq, Default)]
+    pub struct IndicatorsParts {
+        /// 执行时间（毫秒）
+        pub execute_time: f32,
 
-    /// 影响的行数
-    pub row_count: u32,
-
-    /// 执行 ID
-    pub execute_id: i64,
-}
+        /// 影响的行数
+        pub row_count: u32,
+    }
