@@ -6,22 +6,53 @@ use std::path::Path;
 
 use crate::error::ParseError;
 use crate::sqllog::Sqllog;
+use encoding::all::GB18030;
+use encoding::{DecoderTrap, Encoding};
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FileEncodingHint {
+    /// Unknown / detect per-record (backward compatible)
+    Auto,
+    /// The file is UTF-8
+    Utf8,
+    /// The file is GB18030
+    Gb18030,
+}
+
+impl Default for FileEncodingHint {
+    fn default() -> Self {
+        FileEncodingHint::Auto
+    }
+}
 
 pub struct LogParser {
     mmap: Mmap,
+    encoding: FileEncodingHint,
 }
 
 impl LogParser {
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ParseError> {
         let file = File::open(path).map_err(|e| ParseError::IoError(e.to_string()))?;
         let mmap = unsafe { Mmap::map(&file).map_err(|e| ParseError::IoError(e.to_string()))? };
-        Ok(Self { mmap })
+
+        // Sample the beginning of the file to determine if it's valid UTF-8.
+        // If it's valid UTF-8, treat whole file as UTF-8 for speed. Otherwise assume GB18030.
+        let sample_len = std::cmp::min(65536, mmap.len());
+        let sample = &mmap[..sample_len];
+        let encoding = if std::str::from_utf8(sample).is_ok() {
+            FileEncodingHint::Utf8
+        } else {
+            FileEncodingHint::Gb18030
+        };
+
+        Ok(Self { mmap, encoding })
     }
 
     pub fn iter(&self) -> LogIterator<'_> {
         LogIterator {
             data: &self.mmap,
             pos: 0,
+            encoding: self.encoding,
         }
     }
 }
@@ -29,6 +60,7 @@ impl LogParser {
 pub struct LogIterator<'a> {
     data: &'a [u8],
     pos: usize,
+    encoding: FileEncodingHint,
 }
 
 impl<'a> Iterator for LogIterator<'a> {
@@ -95,17 +127,22 @@ impl<'a> Iterator for LogIterator<'a> {
             return self.next();
         }
 
-        Some(parse_record_with_hint(record_slice, is_multiline))
+        Some(parse_record_with_hint(
+            record_slice,
+            is_multiline,
+            self.encoding,
+        ))
     }
 }
 
 pub fn parse_record<'a>(record_bytes: &'a [u8]) -> Result<Sqllog<'a>, ParseError> {
-    parse_record_with_hint(record_bytes, true)
+    parse_record_with_hint(record_bytes, true, FileEncodingHint::Auto)
 }
 
 fn parse_record_with_hint<'a>(
     record_bytes: &'a [u8],
     is_multiline: bool,
+    encoding_hint: FileEncodingHint,
 ) -> Result<Sqllog<'a>, ParseError> {
     // Find end of first line
     let (first_line, _rest) = if is_multiline {
@@ -190,15 +227,24 @@ fn parse_record_with_hint<'a>(
     let meta_bytes = &first_line[meta_start + 1..meta_end];
     // Lazy parsing: store raw bytes
     // SAFETY: meta_bytes is a sub-slice of first_line, which is 'a.
-    // We assume it's valid UTF-8 (or at least we store it as such for now, validation happens on access if needed,
-    // but actually we just store bytes wrapped in Cow::Borrowed).
-    // Wait, Cow<'a, str> requires valid UTF-8 if Borrowed.
-    // We should use unsafe from_utf8_unchecked because we validated the structure?
-    // No, we haven't validated meta content yet.
-    // But we need to store it in Sqllog.meta_raw which is Cow<'a, str>.
-    // If we use Cow<'a, [u8]>, it would be better. But I used Cow<'a, str> in Sqllog definition.
-    // Let's assume it's UTF-8. It's mostly ASCII.
-    let meta_raw = unsafe { Cow::Borrowed(std::str::from_utf8_unchecked(meta_bytes)) };
+    // Use the provided encoding hint (file-level autodetection) to decide how to decode meta bytes.
+    let meta_raw = match encoding_hint {
+        FileEncodingHint::Utf8 => match std::str::from_utf8(meta_bytes) {
+            Ok(s) => Cow::Borrowed(s),
+            Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
+        },
+        FileEncodingHint::Gb18030 => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
+            Ok(s) => Cow::Owned(s),
+            Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
+        },
+        FileEncodingHint::Auto => match std::str::from_utf8(meta_bytes) {
+            Ok(s) => Cow::Borrowed(s),
+            Err(_) => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
+                Ok(s) => Cow::Owned(s),
+                Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
+            },
+        },
+    };
 
     // 3. Body & 4. Indicators
     let body_start_in_first_line = meta_end + 1;
@@ -226,5 +272,6 @@ fn parse_record_with_hint<'a>(
         ts,
         meta_raw,
         content_raw,
+        encoding: encoding_hint,
     })
 }
