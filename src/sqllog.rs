@@ -22,6 +22,9 @@ pub struct Sqllog<'a> {
     /// 原始内容（包含 Body 和 Indicators），延迟分割和解析
     pub content_raw: Cow<'a, [u8]>,
 
+    /// 提取出的方括号标签（例如 [SEL]、[ORA]），若无则为 None
+    pub tag: Option<Cow<'a, str>>,
+
     /// 文件级编码 hint（由 parser 探测），用于正确解码 content
     pub encoding: crate::parser::FileEncodingHint,
 }
@@ -354,47 +357,51 @@ impl<'a> Sqllog<'a> {
         }
         meta
     }
+}
 
-    /// 元数据部分
-    ///
-    /// 包含日志记录的所有元数据字段，如会话 ID、用户名等。
-    #[derive(Debug, Clone, PartialEq, Default)]
-    pub struct MetaParts<'a> {
-        /// EP（Execution Point）编号，范围 0-255
-        pub ep: u8,
+/// 元数据部分
+///
+/// 包含日志记录的所有元数据字段，如会话 ID、用户名等。
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MetaParts<'a> {
+    /// EP（Execution Point）编号，范围 0-255
+    pub ep: u8,
 
-        /// 会话 ID
-        pub sess_id: Cow<'a, str>,
+    /// 会话 ID
+    pub sess_id: Cow<'a, str>,
 
-        /// 线程 ID
-        pub thrd_id: Cow<'a, str>,
+    /// 线程 ID
+    pub thrd_id: Cow<'a, str>,
 
-        /// 用户名
-        pub username: Cow<'a, str>,
+    /// 用户名
+    pub username: Cow<'a, str>,
 
-        /// 事务 ID
-        pub trxid: Cow<'a, str>,
+    /// 事务 ID
+    pub trxid: Cow<'a, str>,
 
-        /// 语句 ID
-        pub statement: Cow<'a, str>,
+    /// 语句 ID
+    pub statement: Cow<'a, str>,
 
-        /// 应用程序名称
-        pub appname: Cow<'a, str>,
+    /// 应用程序名称
+    pub appname: Cow<'a, str>,
 
-        /// 客户端 IP 地址（可选）
-        pub client_ip: Cow<'a, str>,
-    }
+    /// 客户端 IP 地址（可选）
+    pub client_ip: Cow<'a, str>,
+}
 
-    /// 性能指标部分
-    ///
-    /// 包含 SQL 执行的性能指标，如执行时间、影响行数等。
-    ///
+/// 性能指标部分
+///
+/// 包含 SQL 执行的性能指标，如执行时间、影响行数等。
+///
 
-    #[derive(Debug, Clone, Copy, PartialEq, Default)]
-    pub struct IndicatorsParts {
-        /// 执行时间（毫秒）
-        pub execute_time: f32,
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct IndicatorsParts {
+    /// 执行时间（毫秒）
+    pub execute_time: f32,
 
-        /// 影响的行数
-        pub row_count: u32,
-    }
+    /// 影响的行数
+    pub row_count: u32,
+
+    /// 执行 ID
+    pub execute_id: i64,
+}

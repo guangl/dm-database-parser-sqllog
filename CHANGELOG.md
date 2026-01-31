@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-01-31
+
+### Added
+- **文件级编码检测**：通过采样前 64KB 自动识别日志文件的编码（UTF‑8 或 GB18030），并将结果缓存到 `LogParser::encoding`，避免对每条记录进行重复猜测，提升解析稳定性与性能。
+- **提取方括号标签**：新增 `Sqllog.tag: Option<Cow<'a, str>>`，自动提取记录前缀的 `[SEL]`、`[ORA]` 等标签（若无则为 `None`）。
+
+### Fixed
+- 修复 GB18030 编码的 meta 与 body 解码问题，防止中文字段被乱码处理。
+- 修复当 `appname:` 为空且紧随的 token 为 `ip:` / `ip::` / `ip:::` 时字段错位的问题。
+
+
 ## [0.6.0] - 2025-12-02
 
 ### Changed

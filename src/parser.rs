@@ -262,16 +262,54 @@ fn parse_record_with_hint<'a>(
 
     let content_start = body_start_in_first_line + start_idx;
 
-    let content_raw = if content_start < record_bytes.len() {
-        Cow::Borrowed(&record_bytes[content_start..])
+    // Extract optional leading tag like [SEL] or [ORA]
+    let mut tag: Option<Cow<'a, str>> = None;
+    let content_slice = if content_start < record_bytes.len() {
+        let mut s = &record_bytes[content_start..];
+        // If it starts with '[', try to find matching ']' and treat inner token as tag
+        if !s.is_empty() && s[0] == b'[' {
+            if let Some(end_idx) = memchr(b']', s) {
+                if end_idx >= 1 {
+                    let inner = &s[1..end_idx];
+                    // Accept token without spaces and reasonable length
+                    if !inner.iter().any(|&b| b == b' ') && inner.len() <= 32 {
+                        tag = match std::str::from_utf8(inner) {
+                            Ok(st) => Some(Cow::Borrowed(st)),
+                            Err(_) => match encoding_hint {
+                                FileEncodingHint::Gb18030 => {
+                                    match GB18030.decode(inner, DecoderTrap::Strict) {
+                                        Ok(s) => Some(Cow::Owned(s)),
+                                        Err(_) => Some(Cow::Owned(
+                                            String::from_utf8_lossy(inner).into_owned(),
+                                        )),
+                                    }
+                                }
+                                _ => Some(Cow::Owned(String::from_utf8_lossy(inner).into_owned())),
+                            },
+                        };
+                        // Move past the closing ']' and any following ASCII whitespace
+                        s = &s[end_idx + 1..];
+                        let mut skip = 0usize;
+                        while skip < s.len() && s[skip].is_ascii_whitespace() {
+                            skip += 1;
+                        }
+                        s = &s[skip..];
+                    }
+                }
+            }
+        }
+        s
     } else {
-        Cow::Borrowed(&[] as &[u8])
+        &[] as &[u8]
     };
+
+    let content_raw = Cow::Borrowed(content_slice);
 
     Ok(Sqllog {
         ts,
         meta_raw,
         content_raw,
+        tag,
         encoding: encoding_hint,
     })
 }

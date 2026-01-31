@@ -121,6 +121,14 @@ fn meta_parsing_gb18030_username() {
 }
 
 #[test]
+fn tag_extraction_and_body_trim() {
+    let raw = b"2025-11-17 16:09:41.123 (EP[1] sess:123 thrd:456 user:u trxid:3 stmt:4 appname:bench) [SEL] SELECT 1; EXEC_ID: 42.";
+    let rec = parse_record(raw).unwrap();
+    assert_eq!(rec.tag.as_deref(), Some("SEL"));
+    assert_eq!(rec.body(), "SELECT 1; ");
+}
+
+#[test]
 fn file_encoding_detection_gb18030() {
     use dm_database_parser_sqllog::parser::LogParser;
     use encoding::all::GB18030;
