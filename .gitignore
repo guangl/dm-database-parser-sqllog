@@ -3,6 +3,7 @@
 *.db
 *.sqlite
 sqllogs/
+dmsql*/
 
 # 覆盖率报告
 lcov.info

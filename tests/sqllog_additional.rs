@@ -90,3 +90,82 @@ fn appname_empty_followed_by_ip_colon_single_should_keep_appname_empty() {
     assert_eq!(meta.appname, "");
     assert_eq!(meta.client_ip, "10.1.1.1");
 }
+
+#[test]
+fn appname_empty_followed_by_ip_triple_colon_should_keep_appname_empty() {
+    // appname: 后跟 token 为 ip:::ffff:10.3.100.68（三冒号形式），应识别为 ip 字段而非 appname 的值
+    let raw = b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname: ip:::ffff:10.3.100.68) X";
+    let rec = parse_record(raw).unwrap();
+    let meta = rec.parse_meta();
+    assert_eq!(meta.appname, "");
+    assert_eq!(meta.client_ip, "::ffff:10.3.100.68");
+}
+
+#[test]
+fn meta_parsing_gb18030_username() {
+    use encoding::all::GB18030;
+    use encoding::{EncoderTrap, Encoding};
+
+    let username = "用户";
+    let user_bytes = GB18030
+        .encode(username, EncoderTrap::Strict)
+        .expect("encode");
+
+    let mut raw: Vec<u8> = b"2025-11-17 16:09:41.123 (EP[2] sess:0xABC thrd:777 user:".to_vec();
+    raw.extend_from_slice(&user_bytes);
+    raw.extend_from_slice(b" trxid:0 stmt:0x2 appname:cli) SELECT");
+
+    let rec = parse_record(&raw).unwrap();
+    let meta = rec.parse_meta();
+    assert_eq!(meta.username, username);
+}
+
+#[test]
+fn file_encoding_detection_gb18030() {
+    use dm_database_parser_sqllog::parser::LogParser;
+    use encoding::all::GB18030;
+    use encoding::{EncoderTrap, Encoding};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let username = "用户";
+    let user_bytes = GB18030
+        .encode(username, EncoderTrap::Strict)
+        .expect("encode");
+
+    let mut line: Vec<u8> = b"2025-11-17 16:09:41.123 (EP[2] sess:0xABC thrd:777 user:".to_vec();
+    line.extend_from_slice(&user_bytes);
+    line.extend_from_slice(b" trxid:0 stmt:0x2 appname:cli) SELECT\n");
+
+    let mut tmp = NamedTempFile::new().expect("tmp");
+    tmp.write_all(&line).expect("write");
+    tmp.as_file().sync_all().expect("sync");
+
+    let parser = LogParser::from_path(tmp.path()).expect("open");
+    let rec = parser.iter().next().unwrap().unwrap();
+    let meta = rec.parse_meta();
+    assert_eq!(meta.username, username);
+}
+
+#[test]
+fn file_encoding_detection_utf8() {
+    use dm_database_parser_sqllog::parser::LogParser;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let username = "用户";
+    let user_bytes = username.as_bytes();
+
+    let mut line: Vec<u8> = b"2025-11-17 16:09:41.123 (EP[2] sess:0xABC thrd:777 user:".to_vec();
+    line.extend_from_slice(&user_bytes);
+    line.extend_from_slice(b" trxid:0 stmt:0x2 appname:cli) SELECT\n");
+
+    let mut tmp = NamedTempFile::new().expect("tmp");
+    tmp.write_all(&line).expect("write");
+    tmp.as_file().sync_all().expect("sync");
+
+    let parser = LogParser::from_path(tmp.path()).expect("open");
+    let rec = parser.iter().next().unwrap().unwrap();
+    let meta = rec.parse_meta();
+    assert_eq!(meta.username, username);
+}
