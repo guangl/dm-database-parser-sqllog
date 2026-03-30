@@ -9,20 +9,15 @@ use crate::sqllog::Sqllog;
 use encoding::all::GB18030;
 use encoding::{DecoderTrap, Encoding};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum FileEncodingHint {
     /// Unknown / detect per-record (backward compatible)
+    #[default]
     Auto,
     /// The file is UTF-8
     Utf8,
     /// The file is GB18030
     Gb18030,
-}
-
-impl Default for FileEncodingHint {
-    fn default() -> Self {
-        FileEncodingHint::Auto
-    }
 }
 
 pub struct LogParser {
@@ -267,35 +262,35 @@ fn parse_record_with_hint<'a>(
     let content_slice = if content_start < record_bytes.len() {
         let mut s = &record_bytes[content_start..];
         // If it starts with '[', try to find matching ']' and treat inner token as tag
-        if !s.is_empty() && s[0] == b'[' {
-            if let Some(end_idx) = memchr(b']', s) {
-                if end_idx >= 1 {
-                    let inner = &s[1..end_idx];
-                    // Accept token without spaces and reasonable length
-                    if !inner.iter().any(|&b| b == b' ') && inner.len() <= 32 {
-                        tag = match std::str::from_utf8(inner) {
-                            Ok(st) => Some(Cow::Borrowed(st)),
-                            Err(_) => match encoding_hint {
-                                FileEncodingHint::Gb18030 => {
-                                    match GB18030.decode(inner, DecoderTrap::Strict) {
-                                        Ok(s) => Some(Cow::Owned(s)),
-                                        Err(_) => Some(Cow::Owned(
-                                            String::from_utf8_lossy(inner).into_owned(),
-                                        )),
-                                    }
+        if !s.is_empty()
+            && s[0] == b'['
+            && let Some(end_idx) = memchr(b']', s)
+            && end_idx >= 1
+        {
+            let inner = &s[1..end_idx];
+            // Accept token without spaces and reasonable length
+            if !inner.contains(&b' ') && inner.len() <= 32 {
+                tag = match std::str::from_utf8(inner) {
+                    Ok(st) => Some(Cow::Borrowed(st)),
+                    Err(_) => match encoding_hint {
+                        FileEncodingHint::Gb18030 => {
+                            match GB18030.decode(inner, DecoderTrap::Strict) {
+                                Ok(s) => Some(Cow::Owned(s)),
+                                Err(_) => {
+                                    Some(Cow::Owned(String::from_utf8_lossy(inner).into_owned()))
                                 }
-                                _ => Some(Cow::Owned(String::from_utf8_lossy(inner).into_owned())),
-                            },
-                        };
-                        // Move past the closing ']' and any following ASCII whitespace
-                        s = &s[end_idx + 1..];
-                        let mut skip = 0usize;
-                        while skip < s.len() && s[skip].is_ascii_whitespace() {
-                            skip += 1;
+                            }
                         }
-                        s = &s[skip..];
-                    }
+                        _ => Some(Cow::Owned(String::from_utf8_lossy(inner).into_owned())),
+                    },
+                };
+                // Move past the closing ']' and any following ASCII whitespace
+                s = &s[end_idx + 1..];
+                let mut skip = 0usize;
+                while skip < s.len() && s[skip].is_ascii_whitespace() {
+                    skip += 1;
                 }
+                s = &s[skip..];
             }
         }
         s

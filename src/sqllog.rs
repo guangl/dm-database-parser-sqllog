@@ -222,11 +222,11 @@ impl<'a> Sqllog<'a> {
                 while end > start && val_bytes[end - 1] == b' ' {
                     end -= 1;
                 }
-                if start < end {
-                    if let Some(count) = atoi::<u32>(&val_bytes[start..end]) {
-                        indicators.row_count = count;
-                        has_indicators = true;
-                    }
+                if start < end
+                    && let Some(count) = atoi::<u32>(&val_bytes[start..end])
+                {
+                    indicators.row_count = count;
+                    has_indicators = true;
                 }
             }
         }
@@ -246,11 +246,11 @@ impl<'a> Sqllog<'a> {
             while trimmed_end > start && val_bytes[trimmed_end - 1] == b' ' {
                 trimmed_end -= 1;
             }
-            if start < trimmed_end {
-                if let Some(id) = atoi::<i64>(&val_bytes[start..trimmed_end]) {
-                    indicators.execute_id = id;
-                    has_indicators = true;
-                }
+            if start < trimmed_end
+                && let Some(id) = atoi::<i64>(&val_bytes[start..trimmed_end])
+            {
+                indicators.execute_id = id;
+                has_indicators = true;
             }
         }
 
