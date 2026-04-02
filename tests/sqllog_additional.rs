@@ -25,7 +25,7 @@ fn indicators_exec_id_only() {
     let rec = parse_record(&raw).unwrap();
     assert_eq!(rec.body(), "SELECT 1; ");
     let ind = rec.parse_indicators().unwrap();
-    assert_eq!(ind.execute_id, 42);
+    assert_eq!(ind.exec_id, 42);
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn indicators_rowcount_only() {
     let rec = parse_record(&raw).unwrap();
     assert_eq!(rec.body(), "UPDATE T SET A=1; ");
     let ind = rec.parse_indicators().unwrap();
-    assert_eq!(ind.row_count, 10);
+    assert_eq!(ind.rowcount, 10);
 }
 
 #[test]
@@ -43,7 +43,7 @@ fn indicators_exectime_only() {
     let rec = parse_record(&raw).unwrap();
     assert_eq!(rec.body(), "DELETE FROM T; ");
     let ind = rec.parse_indicators().unwrap();
-    assert!((ind.execute_time - 3.5).abs() < 1e-6);
+    assert!((ind.exectime - 3.5).abs() < 1e-6);
 }
 
 #[test]
@@ -53,9 +53,9 @@ fn indicators_permutation_all() {
     let rec = parse_record(&raw).unwrap();
     assert_eq!(rec.body(), "SELECT * FROM T ");
     let ind = rec.parse_indicators().unwrap();
-    assert_eq!(ind.row_count, 5);
-    assert!((ind.execute_time - 12.25).abs() < 1e-6);
-    assert_eq!(ind.execute_id, 999);
+    assert_eq!(ind.rowcount, 5);
+    assert!((ind.exectime - 12.25).abs() < 1e-6);
+    assert_eq!(ind.exec_id, 999);
 }
 
 #[test]

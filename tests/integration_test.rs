@@ -22,9 +22,9 @@ fn test_parser_lazy_loading() {
 
     // Check indicators (parsed lazily)
     let indicators = record.parse_indicators().unwrap();
-    assert_eq!(indicators.execute_time, 1.0);
-    assert_eq!(indicators.row_count, 1);
-    assert_eq!(indicators.execute_id, 100);
+    assert_eq!(indicators.exectime, 1.0);
+    assert_eq!(indicators.rowcount, 1);
+    assert_eq!(indicators.exec_id, 100);
 }
 
 #[test]
@@ -43,6 +43,6 @@ fn test_parser_multiline() {
     assert_eq!(record.body(), "SELECT *\nFROM USERS\nWHERE ID = 1;\n");
 
     let indicators = record.parse_indicators().unwrap();
-    assert_eq!(indicators.execute_time, 2.5);
-    assert_eq!(indicators.row_count, 5);
+    assert_eq!(indicators.exectime, 2.5);
+    assert_eq!(indicators.rowcount, 5);
 }
