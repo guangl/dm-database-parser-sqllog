@@ -76,4 +76,4 @@ pub mod tools;
 // 核心类型
 pub use error::ParseError;
 pub use parser::LogParser;
-pub use sqllog::Sqllog;
+pub use sqllog::{PerformanceMetrics, Sqllog};

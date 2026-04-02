@@ -35,5 +35,5 @@ fn iterator_multiline_detection() {
     let r = it.next().unwrap().unwrap();
     assert!(r.body().contains("FROM dual"));
     let ind = r.parse_indicators().unwrap();
-    assert_eq!(ind.row_count, 1);
+    assert_eq!(ind.rowcount, 1);
 }

@@ -10,7 +10,7 @@ fn meta_closing_paren_without_space_then_body_on_next_line() {
     let body = rec.body();
     assert!(body.trim_start().starts_with("SELECT * FROM T"));
     let ind = rec.parse_indicators().unwrap();
-    assert_eq!(ind.execute_id, 7);
+    assert_eq!(ind.exec_id, 7);
 }
 
 #[test]

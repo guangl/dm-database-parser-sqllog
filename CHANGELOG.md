@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-04-02
+
+### Added
+- **`parse_performance_metrics()`**：新增 `Sqllog` 方法，一次调用即可获得 `EXECTIME`、`ROWCOUNT`、`EXEC_ID` 和 SQL 语句，组合为 `PerformanceMetrics` 返回。
+- **ORA tag 前缀自动去除**：当 `tag == "ORA"` 时，`parse_performance_metrics()` 会自动去除 SQL 开头的 `": "` 前缀，`Cow::Borrowed` 路径零分配。
+- **`PerformanceMetrics` 导出**：`PerformanceMetrics` 结构体现已从 crate 根公开导出。
+
+### Changed
+- **合并 `IndicatorsParts` 到 `PerformanceMetrics`**（**破坏性变更**）：
+  - 删除 `IndicatorsParts` 结构体。
+  - `parse_indicators()` 返回类型由 `Option<IndicatorsParts>` 改为 `Option<PerformanceMetrics<'static>>`（`sql` 字段为空字符串）。
+  - 字段重命名：`execute_time` → `exectime`，`row_count` → `rowcount`，`execute_id` → `exec_id`。
+- **性能优化**：`parse_performance_metrics()` 内部仅调用一次 `find_indicators_split()`，彻底消除重复扫描，性能与直接调用 `parse_indicators()` + `body()` 持平（~93 ns/条）。
+
+### Refactored
+- 提取 `decode_content_bytes()`：统一 `body()`、`indicators_raw()`、`parse_performance_metrics()` 三处字节解码逻辑，消除重复代码。
+- 提取 `find_keyword_end_backward()`：将 `find_indicators_split()` 中三个结构相同的 `memrchr` 循环合并为一个通用函数。
+- 提取 `parse_indicators_from_bytes()`：`parse_indicators()` 与 `parse_performance_metrics()` 共享同一解析实现。
+- 提取 `strip_ora_prefix()`、`trim_ascii()`：将分散的内联逻辑提升为具名函数。
+
 ## [0.6.1] - 2026-01-31
 
 ### Added

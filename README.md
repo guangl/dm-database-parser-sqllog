@@ -21,7 +21,7 @@
 
 ```toml
 [dependencies]
-dm-database-parser-sqllog = "0.6"
+dm-database-parser-sqllog = "0.7"
 ```
 
 ### 作为库使用
@@ -100,6 +100,7 @@ CI 中已在 Windows 上执行上述校验以避免环境差异导致波动。
 ### 核心类型
 
 - [`Sqllog`] - SQL 日志结构体（包含时间戳、元数据、SQL 正文等）
+- [`PerformanceMetrics`] - 性能指标与 SQL 语句（`exectime`、`rowcount`、`exec_id`、`sql`）
 - [`ParseError`] - 解析错误类型（包含详细错误信息）
 
 ## 设计与注意事项
@@ -108,6 +109,7 @@ CI 中已在 Windows 上执行上述校验以避免环境差异导致波动。
 - 采用内存映射 (mmap) 技术，适合处理大型日志文件（1GB 文件 < 1 秒）
 - 流式 API 内存占用低，适合超大文件或需要提前中断的场景
 - `body()` 和 `indicators_raw()` 方法采用惰性求值，仅在调用时进行分割和 UTF-8 转换
+- `parse_performance_metrics()` 一次调用获取全部指标与 SQL，内部仅扫描一次尾部窗口（~93 ns/条）；当 tag 为 `ORA` 时自动去除 SQL 开头的 `": "` 前缀
 
 ## 测试
 
