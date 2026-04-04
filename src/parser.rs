@@ -50,6 +50,45 @@ impl LogParser {
             encoding: self.encoding,
         }
     }
+
+    /// Returns a Rayon parallel iterator over all log records.
+    ///
+    /// Splits the file into CPU-count chunks at record boundaries and
+    /// processes each chunk on a separate thread.
+    pub fn par_iter(
+        &self,
+    ) -> impl rayon::iter::ParallelIterator<Item = Result<Sqllog<'_>, ParseError>> + '_ {
+        use rayon::prelude::*;
+
+        let data: &[u8] = &self.mmap;
+        let encoding = self.encoding;
+        let num_threads = rayon::current_num_threads().max(1);
+
+        // Find chunk start positions at record boundaries
+        let mut starts: Vec<usize> = vec![0];
+        if !data.is_empty() {
+            let chunk_size = (data.len() / num_threads).max(1);
+            for i in 1..num_threads {
+                let boundary = find_next_record_start(data, i * chunk_size);
+                if boundary < data.len() {
+                    starts.push(boundary);
+                }
+            }
+        }
+        starts.push(data.len());
+        starts.dedup();
+
+        // Pair up (start, end) boundaries, collect to Vec so we can par_iter
+        let bounds: Vec<(usize, usize)> = starts.windows(2).map(|w| (w[0], w[1])).collect();
+
+        bounds.into_par_iter().flat_map_iter(move |(start, end)| {
+            LogIterator {
+                data: &data[start..end],
+                pos: 0,
+                encoding,
+            }
+        })
+    }
 }
 
 pub struct LogIterator<'a> {
@@ -130,6 +169,41 @@ impl<'a> Iterator for LogIterator<'a> {
     }
 }
 
+/// Find the position of the next record start at or after `from`.
+/// A record start is a line beginning with a timestamp pattern.
+fn find_next_record_start(data: &[u8], from: usize) -> usize {
+    let mut pos = from;
+    // Skip to start of next line
+    if let Some(nl) = memchr(b'\n', &data[pos..]) {
+        pos += nl + 1;
+    } else {
+        return data.len();
+    }
+    // Scan forward for a line starting with timestamp
+    loop {
+        if pos + 23 > data.len() {
+            return data.len();
+        }
+        let peek = &data[pos..pos + 23];
+        if peek[0] == b'2'
+            && peek[1] == b'0'
+            && peek[4] == b'-'
+            && peek[7] == b'-'
+            && peek[10] == b' '
+            && peek[13] == b':'
+            && peek[16] == b':'
+            && peek[19] == b'.'
+        {
+            return pos;
+        }
+        // Skip to next line
+        match memchr(b'\n', &data[pos..]) {
+            Some(nl) => pos += nl + 1,
+            None => return data.len(),
+        }
+    }
+}
+
 pub fn parse_record<'a>(record_bytes: &'a [u8]) -> Result<Sqllog<'a>, ParseError> {
     parse_record_with_hint(record_bytes, true, FileEncodingHint::Auto)
 }
@@ -189,25 +263,10 @@ fn parse_record_with_hint<'a>(
     };
 
     // Find closing ')' for meta.
-    // We search for ") " starting from meta_start.
-    // Optimization: use memchr loop instead of windows(2)
-    let mut search_pos = meta_start;
-    let meta_end = loop {
-        match memchr(b')', &first_line[search_pos..]) {
-            Some(idx) => {
-                let abs_idx = search_pos + idx;
-                // Check if followed by space
-                if abs_idx + 1 < first_line.len() && first_line[abs_idx + 1] == b' ' {
-                    break Some(abs_idx);
-                }
-                // If not, continue searching after this ')'
-                search_pos = abs_idx + 1;
-            }
-            None => {
-                // Fallback: find last ')' if ") " not found (robustness)
-                break memrchr(b')', &first_line[meta_start..]).map(|idx| meta_start + idx);
-            }
-        }
+    // Single SIMD scan for ") " pattern.
+    let meta_end = match memchr::memmem::find(&first_line[meta_start..], b") ") {
+        Some(idx) => Some(meta_start + idx),
+        None => memrchr(b')', &first_line[meta_start..]).map(|idx| meta_start + idx),
     };
 
     let meta_end = match meta_end {
@@ -244,18 +303,14 @@ fn parse_record_with_hint<'a>(
     // 3. Body & 4. Indicators
     let body_start_in_first_line = meta_end + 1;
 
-    let first_line_body = if body_start_in_first_line < first_line.len() {
-        &first_line[body_start_in_first_line..]
+    // The ") " pattern guarantees one space; skip it directly.
+    let content_start = if body_start_in_first_line < first_line.len()
+        && first_line[body_start_in_first_line] == b' '
+    {
+        body_start_in_first_line + 1
     } else {
-        &[]
+        body_start_in_first_line
     };
-
-    let start_idx = first_line_body
-        .iter()
-        .position(|b| !b.is_ascii_whitespace())
-        .unwrap_or(first_line_body.len());
-
-    let content_start = body_start_in_first_line + start_idx;
 
     // Extract optional leading tag like [SEL] or [ORA]
     let mut tag: Option<Cow<'a, str>> = None;
