@@ -1,240 +1,90 @@
-//! 工具函数模块
-//!
-//! 提供了日志格式验证相关的工具函数，主要用于快速判断行是否为有效的记录起始行。
-//!
-//! # Feature 控制
-//!
-//! 本模块所有内容仅作为库内部工具，普通用户无需直接调用。
+use memchr::memchr;
 
-// 时间戳格式常量
 const TIMESTAMP_LENGTH: usize = 23;
 const MIN_LINE_LENGTH: usize = 25;
 
-// 预定义的字节常量，避免重复创建
-const SPACE_BYTE: u8 = b' ';
-const OPEN_PAREN_BYTE: u8 = b'(';
-const CLOSE_PAREN_CHAR: char = ')';
-
-/// 判断字节数组是否为有效的时间戳格式
-///
-/// 验证时间戳格式是否为 "YYYY-MM-DD HH:MM:SS.mmm"（恰好 23 字节）。
-///
-/// # 参数
-///
-/// * `bytes` - 要检查的字节数组
-///
-/// # 返回
-///
-/// 如果是有效的时间戳格式返回 `true`，否则返回 `false`
-///
-/// # 示例
+/// 判断字节数组是否为有效的时间戳格式 "YYYY-MM-DD HH:MM:SS.mmm"（恰好 23 字节）
 ///
 /// ```
 /// use dm_database_parser_sqllog::tools::is_ts_millis_bytes;
-///
-/// let valid = b"2025-08-12 10:57:09.548";
-/// assert!(is_ts_millis_bytes(valid));
-///
-/// let invalid = b"2025-08-12";
-/// assert!(!is_ts_millis_bytes(invalid));
+/// assert!(is_ts_millis_bytes(b"2025-08-12 10:57:09.548"));
+/// assert!(!is_ts_millis_bytes(b"2025-08-12"));
 /// ```
 #[inline(always)]
 pub fn is_ts_millis_bytes(bytes: &[u8]) -> bool {
-    if bytes.len() != TIMESTAMP_LENGTH {
-        return false;
-    }
-
-    // Check separators
-    if bytes[4] != b'-'
-        || bytes[7] != b'-'
-        || bytes[10] != b' '
-        || bytes[13] != b':'
-        || bytes[16] != b':'
-        || bytes[19] != b'.'
-    {
-        return false;
-    }
-
-    // Check digits
-    // 0-3, 5-6, 8-9, 11-12, 14-15, 17-18, 20-22
-    let is_digit = |b: u8| b.is_ascii_digit();
-
-    is_digit(bytes[0])
-        && is_digit(bytes[1])
-        && is_digit(bytes[2])
-        && is_digit(bytes[3])
-        && is_digit(bytes[5])
-        && is_digit(bytes[6])
-        && is_digit(bytes[8])
-        && is_digit(bytes[9])
-        && is_digit(bytes[11])
-        && is_digit(bytes[12])
-        && is_digit(bytes[14])
-        && is_digit(bytes[15])
-        && is_digit(bytes[17])
-        && is_digit(bytes[18])
-        && is_digit(bytes[20])
-        && is_digit(bytes[21])
-        && is_digit(bytes[22])
+    bytes.len() == TIMESTAMP_LENGTH
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b' '
+        && bytes[13] == b':'
+        && bytes[16] == b':'
+        && bytes[19] == b'.'
+        && bytes[0].is_ascii_digit()
+        && bytes[1].is_ascii_digit()
+        && bytes[2].is_ascii_digit()
+        && bytes[3].is_ascii_digit()
+        && bytes[5].is_ascii_digit()
+        && bytes[6].is_ascii_digit()
+        && bytes[8].is_ascii_digit()
+        && bytes[9].is_ascii_digit()
+        && bytes[11].is_ascii_digit()
+        && bytes[12].is_ascii_digit()
+        && bytes[14].is_ascii_digit()
+        && bytes[15].is_ascii_digit()
+        && bytes[17].is_ascii_digit()
+        && bytes[18].is_ascii_digit()
+        && bytes[20].is_ascii_digit()
+        && bytes[21].is_ascii_digit()
+        && bytes[22].is_ascii_digit()
 }
 
 /// 判断一行日志是否为记录起始行
 ///
-/// 这是一个高性能的验证函数，用于快速判断一行文本是否为有效的日志记录起始行。
-///
-/// # 判断标准
-///
-/// 1. 行首 23 字节符合时间戳格式 `YYYY-MM-DD HH:mm:ss.SSS`
-/// 2. 时间戳后紧跟一个空格，然后是 meta 部分
-/// 3. Meta 部分用小括号包含
-/// 4. Meta 部分必须包含所有必需字段（client_ip 可选）
-/// 5. Meta 字段间以一个空格分隔
-/// 6. Meta 字段顺序固定：ep → sess → thrd_id → username → trxid → statement → appname → client_ip（可选）
-///
-/// # 参数
-///
-/// * `line` - 要检查的行
-///
-/// # 返回
-///
-/// 如果是有效的记录起始行返回 `true`，否则返回 `false`
-///
-/// # 示例
+/// 验证：时间戳格式 + ` (` 前缀 + meta 包含 EP、sess、thrd、user、trxid（按序）
 ///
 /// ```
 /// use dm_database_parser_sqllog::tools::is_record_start_line;
-///
 /// let valid = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) SELECT 1";
 /// assert!(is_record_start_line(valid));
-///
-/// let invalid = "This is not a log line";
-/// assert!(!is_record_start_line(invalid));
+/// assert!(!is_record_start_line("This is not a log line"));
 /// ```
-/// 7. meta 部分结束后紧跟一个空格，然后是 body 部分。
 pub fn is_record_start_line(line: &str) -> bool {
-    // 早期退出：检查最小长度
     let bytes = line.as_bytes();
     if bytes.len() < MIN_LINE_LENGTH {
         return false;
     }
-
-    // 早期退出：验证时间戳格式（最快的失败路径）
-    if !is_ts_millis_bytes(&bytes[0..TIMESTAMP_LENGTH]) {
+    if !is_ts_millis_bytes(&bytes[..TIMESTAMP_LENGTH]) {
         return false;
     }
-
-    // 早期退出：检查时间戳后的分隔符 " ("
-    if bytes[23] != SPACE_BYTE || bytes[24] != OPEN_PAREN_BYTE {
+    if bytes[23] != b' ' || bytes[24] != b'(' {
         return false;
     }
-
-    // 早期退出：查找 meta 部分的右括号
-    let closing_paren_index = match line.find(CLOSE_PAREN_CHAR) {
+    let closing = match line.find(')') {
         Some(idx) => idx,
         None => return false,
     };
-
-    // 提取 meta 部分并验证字段
-    let meta_part = &line[25..closing_paren_index];
-    validate_meta_fields_fast(meta_part)
+    validate_meta_fields_fast(&line[25..closing])
 }
 
-/// 一个更轻量的起始行判断，用于 RecordParser 快速判定（减少重复验证）
-///
-/// 该函数仅检查时间戳和括号位置，避免对 meta 字段做完整验证。
-/// 这适用于在解析过程中作为快速筛选器，真正的字段验证仍在解析阶段进行。
-pub fn is_probable_record_start_line(line: &str) -> bool {
-    let bytes = line.as_bytes();
-    if bytes.len() < MIN_LINE_LENGTH {
-        return false;
-    }
-    if !is_ts_millis_bytes(&bytes[0..TIMESTAMP_LENGTH]) {
-        return false;
-    }
-    if bytes[23] != SPACE_BYTE || bytes[24] != OPEN_PAREN_BYTE {
-        return false;
-    }
-    // 只需保证存在闭括号即可
-    line.find(CLOSE_PAREN_CHAR).is_some()
-}
-
-/// 快速验证 meta 字段（只验证 5 个必需字段的顺序和前缀）
-///
-/// 使用字节级操作，比字符串操作快约 2-3 倍
+/// 验证 meta 字段顺序与前缀（EP → sess → thrd → user → trxid）
 #[inline]
 fn validate_meta_fields_fast(meta: &str) -> bool {
     let bytes = meta.as_bytes();
-    let len = bytes.len();
-
-    // 最小长度检查："EP[0] sess:1 thrd:1 user:a trxid:1" 约 38 字节
-    if len < 38 {
+    // 最小合法 meta: "EP[0] sess:1 thrd:1 user:a trxid:1"
+    if bytes.len() < 38 {
         return false;
     }
-
-    // 内联的字节前缀匹配函数
-    #[inline(always)]
-    fn check_prefix(bytes: &[u8], prefix: &[u8]) -> bool {
-        bytes.len() >= prefix.len() && &bytes[..prefix.len()] == prefix
-    }
-
-    // 内联的空格查找函数
-    #[inline(always)]
-    fn find_space(bytes: &[u8]) -> Option<usize> {
-        bytes.iter().position(|&b| b == b' ')
-    }
-
     let mut pos = 0;
-
-    // 1. 验证 EP[ (必须在开头)
-    if !check_prefix(&bytes[pos..], b"EP[") {
-        return false;
+    for prefix in [b"EP[" as &[u8], b"sess:", b"thrd:", b"user:"] {
+        if !bytes[pos..].starts_with(prefix) {
+            return false;
+        }
+        pos += match memchr(b' ', &bytes[pos..]) {
+            Some(idx) => idx + 1,
+            None => return false,
+        };
     }
-    pos = match find_space(&bytes[pos..]) {
-        Some(idx) => pos + idx + 1,
-        None => return false,
-    };
-    if pos >= len {
-        return false;
-    }
-
-    // 2. 验证 sess:
-    if !check_prefix(&bytes[pos..], b"sess:") {
-        return false;
-    }
-    pos = match find_space(&bytes[pos..]) {
-        Some(idx) => pos + idx + 1,
-        None => return false,
-    };
-    if pos >= len {
-        return false;
-    }
-
-    // 3. 验证 thrd:
-    if !check_prefix(&bytes[pos..], b"thrd:") {
-        return false;
-    }
-    pos = match find_space(&bytes[pos..]) {
-        Some(idx) => pos + idx + 1,
-        None => return false,
-    };
-    if pos >= len {
-        return false;
-    }
-
-    // 4. 验证 user:
-    if !check_prefix(&bytes[pos..], b"user:") {
-        return false;
-    }
-    pos = match find_space(&bytes[pos..]) {
-        Some(idx) => pos + idx + 1,
-        None => return false,
-    };
-    if pos >= len {
-        return false;
-    }
-
-    // 5. 验证 trxid:
-    check_prefix(&bytes[pos..], b"trxid:")
+    bytes[pos..].starts_with(b"trxid:")
 }
 
 #[cfg(test)]
@@ -351,9 +201,9 @@ mod tests {
         #[test]
         fn format_errors() {
             let invalid_lines = [
-                "2025-08-12 10:57:09.548(EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body", // 无空格
-                "2025-08-12 10:57:09.548 EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body", // 无左括号
-                "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app body", // 无右括号
+                "2025-08-12 10:57:09.548(EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body",
+                "2025-08-12 10:57:09.548 EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body",
+                "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app body",
             ];
             for line in &invalid_lines {
                 assert!(!is_record_start_line(line), "Should fail for: {}", line);
@@ -362,7 +212,6 @@ mod tests {
 
         #[test]
         fn insufficient_fields() {
-            // 现在支持 5 个字段的格式，测试只有 4 个字段的情况
             let line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice) body";
             assert!(!is_record_start_line(line));
         }
@@ -375,7 +224,6 @@ mod tests {
 
         #[test]
         fn missing_required_fields() {
-            // 只有前 5 个字段是必需的: EP, sess, thrd, user, trxid
             let test_cases = [
                 (
                     "2025-08-12 10:57:09.548 (sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body",
@@ -415,10 +263,7 @@ mod tests {
 
         #[test]
         fn with_invalid_ip_format() {
-            // IP 格式错误（应该是 ip:::ffff: 而不是 ip:）
             let line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app ip:192.168.1.100) body";
-            // 这个格式实际上会通过，因为 "ip:192.168.1.100)" 会被当作 appname 值的一部分
-            // 让我们测试一个真正无效的格式
             assert!(is_record_start_line(line));
         }
 
@@ -442,13 +287,9 @@ mod tests {
 
         #[test]
         fn double_space_in_meta() {
-            // v0.1.3+: 更严格的验证，要求字段之间只有单个空格
-            // 双空格会导致验证失败
             let line = "2025-08-12 10:57:09.548 (EP[0]  sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body";
-            // 新版本中这不会通过，因为我们要求严格的单空格分隔
             assert!(!is_record_start_line(line));
 
-            // 正确的格式应该是单空格
             let valid_line = "2025-08-12 10:57:09.548 (EP[0] sess:123 thrd:456 user:alice trxid:789 stmt:999 appname:app) body";
             assert!(is_record_start_line(valid_line));
         }

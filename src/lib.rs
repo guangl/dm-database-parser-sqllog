@@ -69,11 +69,8 @@
 pub mod error;
 pub mod parser;
 pub mod sqllog;
-
-// 保留 parser 和 tools 模块作为公共模块，但不自动重导出所有内容
 pub mod tools;
 
-// 核心类型
 pub use error::ParseError;
 pub use parser::LogParser;
 pub use sqllog::{PerformanceMetrics, Sqllog};
