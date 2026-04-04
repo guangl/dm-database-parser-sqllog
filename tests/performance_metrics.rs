@@ -1,4 +1,4 @@
-use dm_database_parser_sqllog::parser::parse_record;
+use dm_database_parser_sqllog::parse_record;
 
 fn build_record(tag_and_body: &str, tail: &str) -> Vec<u8> {
     let header =

@@ -17,7 +17,7 @@ use encoding::{DecoderTrap, Encoding};
 static FINDER_CLOSE_META: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b") "));
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
-pub enum FileEncodingHint {
+pub(crate) enum FileEncodingHint {
     #[default]
     Auto,
     Utf8,

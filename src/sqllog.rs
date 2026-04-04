@@ -33,7 +33,7 @@ pub struct Sqllog<'a> {
     pub tag: Option<Cow<'a, str>>,
 
     /// 文件级编码 hint（由 parser 探测），用于正确解码 content
-    pub encoding: FileEncodingHint,
+    pub(crate) encoding: FileEncodingHint,
 }
 
 impl<'a> Sqllog<'a> {

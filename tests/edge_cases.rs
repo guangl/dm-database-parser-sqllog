@@ -1,4 +1,4 @@
-use dm_database_parser_sqllog::{LogParser, parser::parse_record};
+use dm_database_parser_sqllog::{LogParser, parse_record};
 use std::io::Write;
 use tempfile::NamedTempFile;
 

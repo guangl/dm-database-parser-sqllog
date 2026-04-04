@@ -1,4 +1,4 @@
-use dm_database_parser_sqllog::parser::parse_record;
+use dm_database_parser_sqllog::parse_record;
 
 fn build_record(line1_body: &str, tail: &str) -> Vec<u8> {
     let header = b"2025-11-17 16:09:41.123 (EP[1] sess:123 thrd:456 user:alice trxid:789 stmt:0x1 appname:bench) ";
@@ -130,7 +130,7 @@ fn tag_extraction_and_body_trim() {
 
 #[test]
 fn file_encoding_detection_gb18030() {
-    use dm_database_parser_sqllog::parser::LogParser;
+    use dm_database_parser_sqllog::LogParser;
     use encoding::all::GB18030;
     use encoding::{EncoderTrap, Encoding};
     use std::io::Write;
@@ -157,7 +157,7 @@ fn file_encoding_detection_gb18030() {
 
 #[test]
 fn file_encoding_detection_utf8() {
-    use dm_database_parser_sqllog::parser::LogParser;
+    use dm_database_parser_sqllog::LogParser;
     use std::io::Write;
     use tempfile::NamedTempFile;
 

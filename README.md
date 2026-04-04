@@ -11,7 +11,7 @@
 
 - **零分配解析**：基于时间戳的记录切分，使用流式 API 和 `Cow` 类型避免额外内存分配
 - **完全惰性解析**：仅在需要时解析 SQL 正文和性能指标，大幅提升扫描速度
-- **极致性能**：单线程 >8GB/s，多线程（rayon）>28GB/s
+- **极致性能**：单线程 ~7.8 GB/s，多线程（rayon）>28 GB/s
 - **轻量级结构**：解析结果使用引用（`&str`），避免不必要的字符串复制
 - **详细的错误信息**：所有解析错误都包含原始数据，便于调试和问题定位
 
@@ -21,7 +21,7 @@
 
 ```toml
 [dependencies]
-dm-database-parser-sqllog = "0.8"
+dm-database-parser-sqllog = "0.9"
 ```
 
 ### 作为库使用
@@ -100,6 +100,7 @@ CI 中已在 Windows 上执行上述校验以避免环境差异导致波动。
 ### 核心类型
 
 - [`Sqllog`] - SQL 日志结构体（包含时间戳、元数据、SQL 正文等）
+- [`MetaParts`] - 元数据字段（`ep`、`sess_id`、`username`、`trxid` 等）
 - [`PerformanceMetrics`] - 性能指标与 SQL 语句（`exectime`、`rowcount`、`exec_id`、`sql`）
 - [`ParseError`] - 解析错误类型（包含详细错误信息）
 

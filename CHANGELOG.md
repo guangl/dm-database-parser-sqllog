@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-04-04
+
+### Changed
+- **最小化公开 API**（**破坏性变更**）：
+  - 所有子模块（`error`、`parser`、`sqllog`、`tools`）改为 `pub(crate)`，不再作为公开模块暴露。
+  - `FileEncodingHint` 改为 `pub(crate)`；`Sqllog.encoding` 字段改为 `pub(crate)`。
+  - `tools` 中的 `is_ts_millis_bytes` / `is_record_start_line` 改为 `pub(crate)`，不再对外可见。
+  - 从 crate 根统一重导出用户所需的全部类型：`LogParser`、`LogIterator`、`parse_record`、`Sqllog`、`MetaParts`、`PerformanceMetrics`、`ParseError`。
+
+### Migration
+将原来通过子模块访问的导入路径改为 crate 根路径：
+
+```rust
+// before
+use dm_database_parser_sqllog::parser::parse_record;
+use dm_database_parser_sqllog::parser::LogParser;
+
+// after
+use dm_database_parser_sqllog::{parse_record, LogParser};
+```
+
 ## [0.8.0] - 2026-04-04
 
 ### Added
@@ -17,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - meta 关闭符 `") "` 搜索由 `memchr(b')')` 循环改为 `memmem::Finder`（预构建）。
   - `strip_ora_prefix` 使用 `drain(..2)` 避免 Owned 路径的重分配。
   - `rayon` 移至正式依赖。
-- 单线程中位吞吐量：6.7 GB/s → 8.8 GB/s；多线程（8 核）中位吞吐量：~28.9 GB/s。
+- 单线程中位吞吐量：6.7 GB/s → 7.8 GB/s（baseline: 674 µs / 5 MB）；多线程（8 核）中位吞吐量：~28.9 GB/s。
 
 ## [0.7.0] - 2026-04-02
 

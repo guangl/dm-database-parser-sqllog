@@ -66,11 +66,10 @@
 //! SELECT * FROM table EXECTIME: 10.5(ms) ROWCOUNT: 100(rows) EXEC_ID: 12345.
 //! ```
 
-pub mod error;
-pub mod parser;
-pub mod sqllog;
-pub mod tools;
+pub(crate) mod error;
+pub(crate) mod parser;
+pub(crate) mod sqllog;
 
 pub use error::ParseError;
-pub use parser::LogParser;
-pub use sqllog::{PerformanceMetrics, Sqllog};
+pub use parser::{LogIterator, LogParser, parse_record};
+pub use sqllog::{MetaParts, PerformanceMetrics, Sqllog};
