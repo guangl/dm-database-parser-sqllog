@@ -1,22 +1,26 @@
+use memchr::memmem::Finder;
 use memchr::{memchr, memrchr};
 use memmap2::Mmap;
+use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
 use std::fs::File;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use crate::error::ParseError;
 use crate::sqllog::Sqllog;
 use encoding::all::GB18030;
 use encoding::{DecoderTrap, Encoding};
 
+/// Pre-built SIMD searcher for the `") "` meta-close pattern.
+/// Avoids rebuilding the Finder on every record parse.
+static FINDER_CLOSE_META: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b") "));
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum FileEncodingHint {
-    /// Unknown / detect per-record (backward compatible)
     #[default]
     Auto,
-    /// The file is UTF-8
     Utf8,
-    /// The file is GB18030
     Gb18030,
 }
 
@@ -30,11 +34,9 @@ impl LogParser {
         let file = File::open(path).map_err(|e| ParseError::IoError(e.to_string()))?;
         let mmap = unsafe { Mmap::map(&file).map_err(|e| ParseError::IoError(e.to_string()))? };
 
-        // Sample the beginning of the file to determine if it's valid UTF-8.
-        // If it's valid UTF-8, treat whole file as UTF-8 for speed. Otherwise assume GB18030.
-        let sample_len = std::cmp::min(65536, mmap.len());
-        let sample = &mmap[..sample_len];
-        let encoding = if std::str::from_utf8(sample).is_ok() {
+        // Sample the first 64 KB to determine encoding.
+        let sample = &mmap[..mmap.len().min(65536)];
+        let encoding = if simd_from_utf8(sample).is_ok() {
             FileEncodingHint::Utf8
         } else {
             FileEncodingHint::Gb18030
@@ -49,6 +51,45 @@ impl LogParser {
             pos: 0,
             encoding: self.encoding,
         }
+    }
+
+    /// Returns a Rayon parallel iterator over all log records.
+    ///
+    /// Splits the file into CPU-count chunks at record boundaries and
+    /// processes each chunk on a separate thread.
+    pub fn par_iter(
+        &self,
+    ) -> impl rayon::iter::ParallelIterator<Item = Result<Sqllog<'_>, ParseError>> + '_ {
+        use rayon::prelude::*;
+
+        let data: &[u8] = &self.mmap;
+        let encoding = self.encoding;
+        let num_threads = rayon::current_num_threads().max(1);
+
+        // Find chunk start positions at record boundaries
+        let mut starts: Vec<usize> = vec![0];
+        if !data.is_empty() {
+            let chunk_size = (data.len() / num_threads).max(1);
+            for i in 1..num_threads {
+                let boundary = find_next_record_start(data, i * chunk_size);
+                if boundary < data.len() {
+                    starts.push(boundary);
+                }
+            }
+        }
+        starts.push(data.len());
+        starts.dedup();
+
+        // Pair up (start, end) boundaries, collect to Vec so we can par_iter
+        let bounds: Vec<(usize, usize)> = starts.windows(2).map(|w| (w[0], w[1])).collect();
+
+        bounds
+            .into_par_iter()
+            .flat_map_iter(move |(start, end)| LogIterator {
+                data: &data[start..end],
+                pos: 0,
+                encoding,
+            })
     }
 }
 
@@ -130,6 +171,41 @@ impl<'a> Iterator for LogIterator<'a> {
     }
 }
 
+/// Find the position of the next record start at or after `from`.
+/// A record start is a line beginning with a timestamp pattern.
+fn find_next_record_start(data: &[u8], from: usize) -> usize {
+    let mut pos = from;
+    // Skip to start of next line
+    if let Some(nl) = memchr(b'\n', &data[pos..]) {
+        pos += nl + 1;
+    } else {
+        return data.len();
+    }
+    // Scan forward for a line starting with timestamp
+    loop {
+        if pos + 23 > data.len() {
+            return data.len();
+        }
+        let peek = &data[pos..pos + 23];
+        if peek[0] == b'2'
+            && peek[1] == b'0'
+            && peek[4] == b'-'
+            && peek[7] == b'-'
+            && peek[10] == b' '
+            && peek[13] == b':'
+            && peek[16] == b':'
+            && peek[19] == b'.'
+        {
+            return pos;
+        }
+        // Skip to next line
+        match memchr(b'\n', &data[pos..]) {
+            Some(nl) => pos += nl + 1,
+            None => return data.len(),
+        }
+    }
+}
+
 pub fn parse_record<'a>(record_bytes: &'a [u8]) -> Result<Sqllog<'a>, ParseError> {
     parse_record_with_hint(record_bytes, true, FileEncodingHint::Auto)
 }
@@ -188,26 +264,10 @@ fn parse_record_with_hint<'a>(
         }
     };
 
-    // Find closing ')' for meta.
-    // We search for ") " starting from meta_start.
-    // Optimization: use memchr loop instead of windows(2)
-    let mut search_pos = meta_start;
-    let meta_end = loop {
-        match memchr(b')', &first_line[search_pos..]) {
-            Some(idx) => {
-                let abs_idx = search_pos + idx;
-                // Check if followed by space
-                if abs_idx + 1 < first_line.len() && first_line[abs_idx + 1] == b' ' {
-                    break Some(abs_idx);
-                }
-                // If not, continue searching after this ')'
-                search_pos = abs_idx + 1;
-            }
-            None => {
-                // Fallback: find last ')' if ") " not found (robustness)
-                break memrchr(b')', &first_line[meta_start..]).map(|idx| meta_start + idx);
-            }
-        }
+    // Find closing ')' for meta using pre-built SIMD Finder.
+    let meta_end = match FINDER_CLOSE_META.find(&first_line[meta_start..]) {
+        Some(idx) => Some(meta_start + idx),
+        None => memrchr(b')', &first_line[meta_start..]).map(|idx| meta_start + idx),
     };
 
     let meta_end = match meta_end {
@@ -224,16 +284,32 @@ fn parse_record_with_hint<'a>(
     // SAFETY: meta_bytes is a sub-slice of first_line, which is 'a.
     // Use the provided encoding hint (file-level autodetection) to decide how to decode meta bytes.
     let meta_raw = match encoding_hint {
-        FileEncodingHint::Utf8 => match std::str::from_utf8(meta_bytes) {
-            Ok(s) => Cow::Borrowed(s),
+        FileEncodingHint::Utf8 => match simd_from_utf8(meta_bytes) {
+            Ok(s) => {
+                // SAFETY: meta_bytes is a sub-slice of first_line which lives for 'a
+                unsafe {
+                    Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        s.as_ptr(),
+                        s.len(),
+                    )))
+                }
+            }
             Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
         },
         FileEncodingHint::Gb18030 => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
             Ok(s) => Cow::Owned(s),
             Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
         },
-        FileEncodingHint::Auto => match std::str::from_utf8(meta_bytes) {
-            Ok(s) => Cow::Borrowed(s),
+        FileEncodingHint::Auto => match simd_from_utf8(meta_bytes) {
+            Ok(s) => {
+                // SAFETY: meta_bytes is a sub-slice of first_line which lives for 'a
+                unsafe {
+                    Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        s.as_ptr(),
+                        s.len(),
+                    )))
+                }
+            }
             Err(_) => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
                 Ok(s) => Cow::Owned(s),
                 Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
@@ -244,18 +320,14 @@ fn parse_record_with_hint<'a>(
     // 3. Body & 4. Indicators
     let body_start_in_first_line = meta_end + 1;
 
-    let first_line_body = if body_start_in_first_line < first_line.len() {
-        &first_line[body_start_in_first_line..]
+    // The ") " pattern guarantees one space; skip it directly.
+    let content_start = if body_start_in_first_line < first_line.len()
+        && first_line[body_start_in_first_line] == b' '
+    {
+        body_start_in_first_line + 1
     } else {
-        &[]
+        body_start_in_first_line
     };
-
-    let start_idx = first_line_body
-        .iter()
-        .position(|b| !b.is_ascii_whitespace())
-        .unwrap_or(first_line_body.len());
-
-    let content_start = body_start_in_first_line + start_idx;
 
     // Extract optional leading tag like [SEL] or [ORA]
     let mut tag: Option<Cow<'a, str>> = None;
@@ -270,8 +342,14 @@ fn parse_record_with_hint<'a>(
             let inner = &s[1..end_idx];
             // Accept token without spaces and reasonable length
             if !inner.contains(&b' ') && inner.len() <= 32 {
-                tag = match std::str::from_utf8(inner) {
-                    Ok(st) => Some(Cow::Borrowed(st)),
+                tag = match simd_from_utf8(inner) {
+                    Ok(st) => Some(unsafe {
+                        // SAFETY: inner is a sub-slice of record_bytes which lives for 'a
+                        Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                            st.as_ptr(),
+                            st.len(),
+                        )))
+                    }),
                     Err(_) => match encoding_hint {
                         FileEncodingHint::Gb18030 => {
                             match GB18030.decode(inner, DecoderTrap::Strict) {

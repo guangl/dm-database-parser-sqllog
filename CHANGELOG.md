@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-04-04
+
+### Added
+- **`LogParser::par_iter()`**：基于 rayon 的并行迭代器，自动按 CPU 核心数切分文件边界并行处理，多线程吞吐量 >28 GB/s（~3.3x 单线程提升）。
+
+### Changed
+- **性能优化（单线程 +33%）**：
+  - `memmem::find` 改为预构建静态 `LazyLock<Finder>`，消除每条记录的 Finder 初始化开销（原占 self-time 9.3%）。
+  - meta 与 tag 的 UTF-8 校验从 `std::str::from_utf8` 改为 `simdutf8`（原占 self-time 27.6%）。
+  - meta 关闭符 `") "` 搜索由 `memchr(b')')` 循环改为 `memmem::Finder`（预构建）。
+  - `strip_ora_prefix` 使用 `drain(..2)` 避免 Owned 路径的重分配。
+  - `rayon` 移至正式依赖。
+- 单线程中位吞吐量：6.7 GB/s → 8.8 GB/s；多线程（8 核）中位吞吐量：~28.9 GB/s。
+
 ## [0.7.0] - 2026-04-02
 
 ### Added
