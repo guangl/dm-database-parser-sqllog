@@ -1,13 +1,20 @@
+use memchr::memmem::Finder;
 use memchr::{memchr, memrchr};
 use memmap2::Mmap;
+use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
 use std::fs::File;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use crate::error::ParseError;
 use crate::sqllog::Sqllog;
 use encoding::all::GB18030;
 use encoding::{DecoderTrap, Encoding};
+
+/// Pre-built SIMD searcher for the `") "` meta-close pattern.
+/// Avoids rebuilding the Finder on every record parse.
+static FINDER_CLOSE_META: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b") "));
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum FileEncodingHint {
@@ -34,7 +41,7 @@ impl LogParser {
         // If it's valid UTF-8, treat whole file as UTF-8 for speed. Otherwise assume GB18030.
         let sample_len = std::cmp::min(65536, mmap.len());
         let sample = &mmap[..sample_len];
-        let encoding = if std::str::from_utf8(sample).is_ok() {
+        let encoding = if simd_from_utf8(sample).is_ok() {
             FileEncodingHint::Utf8
         } else {
             FileEncodingHint::Gb18030
@@ -81,13 +88,13 @@ impl LogParser {
         // Pair up (start, end) boundaries, collect to Vec so we can par_iter
         let bounds: Vec<(usize, usize)> = starts.windows(2).map(|w| (w[0], w[1])).collect();
 
-        bounds.into_par_iter().flat_map_iter(move |(start, end)| {
-            LogIterator {
+        bounds
+            .into_par_iter()
+            .flat_map_iter(move |(start, end)| LogIterator {
                 data: &data[start..end],
                 pos: 0,
                 encoding,
-            }
-        })
+            })
     }
 }
 
@@ -262,9 +269,8 @@ fn parse_record_with_hint<'a>(
         }
     };
 
-    // Find closing ')' for meta.
-    // Single SIMD scan for ") " pattern.
-    let meta_end = match memchr::memmem::find(&first_line[meta_start..], b") ") {
+    // Find closing ')' for meta using pre-built SIMD Finder.
+    let meta_end = match FINDER_CLOSE_META.find(&first_line[meta_start..]) {
         Some(idx) => Some(meta_start + idx),
         None => memrchr(b')', &first_line[meta_start..]).map(|idx| meta_start + idx),
     };
@@ -283,16 +289,32 @@ fn parse_record_with_hint<'a>(
     // SAFETY: meta_bytes is a sub-slice of first_line, which is 'a.
     // Use the provided encoding hint (file-level autodetection) to decide how to decode meta bytes.
     let meta_raw = match encoding_hint {
-        FileEncodingHint::Utf8 => match std::str::from_utf8(meta_bytes) {
-            Ok(s) => Cow::Borrowed(s),
+        FileEncodingHint::Utf8 => match simd_from_utf8(meta_bytes) {
+            Ok(s) => {
+                // SAFETY: meta_bytes is a sub-slice of first_line which lives for 'a
+                unsafe {
+                    Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        s.as_ptr(),
+                        s.len(),
+                    )))
+                }
+            }
             Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
         },
         FileEncodingHint::Gb18030 => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
             Ok(s) => Cow::Owned(s),
             Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
         },
-        FileEncodingHint::Auto => match std::str::from_utf8(meta_bytes) {
-            Ok(s) => Cow::Borrowed(s),
+        FileEncodingHint::Auto => match simd_from_utf8(meta_bytes) {
+            Ok(s) => {
+                // SAFETY: meta_bytes is a sub-slice of first_line which lives for 'a
+                unsafe {
+                    Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        s.as_ptr(),
+                        s.len(),
+                    )))
+                }
+            }
             Err(_) => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
                 Ok(s) => Cow::Owned(s),
                 Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
@@ -325,8 +347,14 @@ fn parse_record_with_hint<'a>(
             let inner = &s[1..end_idx];
             // Accept token without spaces and reasonable length
             if !inner.contains(&b' ') && inner.len() <= 32 {
-                tag = match std::str::from_utf8(inner) {
-                    Ok(st) => Some(Cow::Borrowed(st)),
+                tag = match simd_from_utf8(inner) {
+                    Ok(st) => Some(unsafe {
+                        // SAFETY: inner is a sub-slice of record_bytes which lives for 'a
+                        Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                            st.as_ptr(),
+                            st.len(),
+                        )))
+                    }),
                     Err(_) => match encoding_hint {
                         FileEncodingHint::Gb18030 => {
                             match GB18030.decode(inner, DecoderTrap::Strict) {

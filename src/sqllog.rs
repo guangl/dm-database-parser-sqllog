@@ -2,11 +2,18 @@ use atoi::atoi;
 use encoding::DecoderTrap;
 use encoding::Encoding;
 use encoding::all::GB18030;
+use memchr::memmem::Finder;
 use memchr::{memchr, memrchr};
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
+use std::sync::LazyLock;
 
 use crate::parser::FileEncodingHint;
+
+/// Pre-built SIMD finders for performance indicators — avoids per-call initialization.
+static FINDER_EXECTIME: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"EXECTIME:"));
+static FINDER_ROWCOUNT: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"ROWCOUNT:"));
+static FINDER_EXEC_ID: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"EXEC_ID:"));
 
 /// SQL 日志记录
 ///
@@ -284,10 +291,10 @@ fn parse_indicators_from_bytes(ind: &[u8]) -> Option<PerformanceMetrics<'static>
     let mut out = PerformanceMetrics::default();
     let mut found = false;
 
-    if let Some(idx) = memchr::memmem::find(ind, b"EXECTIME:") {
+    if let Some(idx) = FINDER_EXECTIME.find(ind) {
         let ss = idx + 9;
         if let Some(pi) = memchr(b'(', &ind[ss..]) {
-            let val = trim_ascii(&ind[ss..ss + pi]);
+            let val = ind[ss..ss + pi].trim_ascii();
             if let Ok(t) = unsafe { std::str::from_utf8_unchecked(val) }.parse::<f32>() {
                 out.exectime = t;
                 found = true;
@@ -295,22 +302,22 @@ fn parse_indicators_from_bytes(ind: &[u8]) -> Option<PerformanceMetrics<'static>
         }
     }
 
-    if let Some(idx) = memchr::memmem::find(ind, b"ROWCOUNT:") {
+    if let Some(idx) = FINDER_ROWCOUNT.find(ind) {
         let ss = idx + 9;
         if let Some(pi) = memchr(b'(', &ind[ss..])
-            && let Some(c) = atoi::<u32>(trim_ascii(&ind[ss..ss + pi]))
+            && let Some(c) = atoi::<u32>(ind[ss..ss + pi].trim_ascii())
         {
             out.rowcount = c;
             found = true;
         }
     }
 
-    if let Some(idx) = memchr::memmem::find(ind, b"EXEC_ID:") {
+    if let Some(idx) = FINDER_EXEC_ID.find(ind) {
         let ss = idx + 8;
         let end = memchr(b'.', &ind[ss..])
             .map(|i| ss + i)
             .unwrap_or(ind.len());
-        if let Some(id) = atoi::<i64>(trim_ascii(&ind[ss..end])) {
+        if let Some(id) = atoi::<i64>(ind[ss..end].trim_ascii()) {
             out.exec_id = id;
             found = true;
         }
@@ -319,30 +326,18 @@ fn parse_indicators_from_bytes(ind: &[u8]) -> Option<PerformanceMetrics<'static>
     found.then_some(out)
 }
 
-/// Strip a leading `": "` prefix from a `Cow<str>` (zero-alloc for the `Borrowed` path).
+/// Strip a leading `": "` prefix from a `Cow<str>` (zero-alloc for both paths).
 #[inline]
 fn strip_ora_prefix(s: Cow<'_, str>) -> Cow<'_, str> {
     match s {
-        Cow::Borrowed(s) => Cow::Borrowed(s.strip_prefix(": ").unwrap_or(s)),
-        Cow::Owned(s) => match s.strip_prefix(": ") {
-            Some(stripped) => Cow::Owned(stripped.to_string()),
-            None => Cow::Owned(s),
-        },
+        Cow::Borrowed(inner) => Cow::Borrowed(inner.strip_prefix(": ").unwrap_or(inner)),
+        Cow::Owned(mut inner) => {
+            if inner.starts_with(": ") {
+                inner.drain(..2);
+            }
+            Cow::Owned(inner)
+        }
     }
-}
-
-/// ASCII 空格裁剪（不分配，仅返回子切片）
-#[inline]
-fn trim_ascii(b: &[u8]) -> &[u8] {
-    let mut s = 0;
-    let mut e = b.len();
-    while s < e && b[s] == b' ' {
-        s += 1;
-    }
-    while e > s && b[e - 1] == b' ' {
-        e -= 1;
-    }
-    &b[s..e]
 }
 
 // ── Public types ──────────────────────────────────────────────────────────────
