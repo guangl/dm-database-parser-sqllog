@@ -72,10 +72,17 @@ fn report(label: &str, durations: &[Duration], file_bytes: usize) {
 }
 
 fn main() {
-    println!("Generating ~{} MB synthetic log data…", TARGET_SIZE / 1024 / 1024);
+    println!(
+        "Generating ~{} MB synthetic log data…",
+        TARGET_SIZE / 1024 / 1024
+    );
     let data = generate_log_data(TARGET_SIZE);
     let actual_bytes = data.len();
-    println!("Generated {:.2} MB ({} records)", actual_bytes as f64 / 1024.0 / 1024.0, actual_bytes / RECORD_TEMPLATE.len());
+    println!(
+        "Generated {:.2} MB ({} records)",
+        actual_bytes as f64 / 1024.0 / 1024.0,
+        actual_bytes / RECORD_TEMPLATE.len()
+    );
 
     // Write to a temp file
     let tmp = tempfile_path();
@@ -105,7 +112,10 @@ fn main() {
     let iter_median = median_throughput(&iter_durations, actual_bytes);
     let par_median = median_throughput(&par_durations, actual_bytes);
     if iter_median > 0.0 {
-        println!("\npar_iter() speedup over iter(): {:.2}x", par_median / iter_median);
+        println!(
+            "\npar_iter() speedup over iter(): {:.2}x",
+            par_median / iter_median
+        );
     }
 
     // Clean up
