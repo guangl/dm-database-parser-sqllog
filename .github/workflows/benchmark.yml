@@ -12,6 +12,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   benchmark:
@@ -45,22 +46,14 @@ jobs:
           cargo install cargo-criterion --locked || true
 
       - name: Run parser benchmarks
-        run: |
-          cargo bench --bench parser_bench || echo "Benchmark failed but continuing"
-
-      - name: Run performance tests
-        run: |
-          cargo bench --bench performance_test || echo "Performance test failed but continuing"
+        run: cargo bench --bench parser_benchmark
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: benchmark-results
-          path: |
-            target/criterion/**/*.html
-            parser_bench.html
-            performance_test.html
+          path: target/criterion/**/*.html
           retention-days: 30
 
       - name: Comment PR with benchmark results
