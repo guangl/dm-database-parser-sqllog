@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "dm-database-parser-sqllog"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "atoi",
  "criterion",

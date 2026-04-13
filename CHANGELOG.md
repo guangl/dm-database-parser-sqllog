@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-04-13
+
+### Changed
+- **热路径性能优化（单线程 -20.5%）**：
+  - `find_indicators_split()` 中的 `memrchr` 循环改为 SIMD `FinderRev`（预构建）。
+  - `decode_content_bytes()`、`parse_record_with_hint()` 的 meta/tag 路径跳过 UTF-8 文件的 `simdutf8` 重复校验。
+  - `parse_indicators_from_bytes()` 中 `str.parse::<f32>()` 改为 `fast-float`。
+  - `[profile.release]` 新增 `lto = "fat"` 与 `codegen-units = 1`。
+- **依赖升级**：`memchr 2.8.0`、`memmap2 0.9.10`、`thiserror 2.0.18`、`tempfile 3.27` 等升级至最新兼容版本。
+- Benchmark 结果：`parse_sqllog_file_5mb` 中位耗时 693 µs → 551 µs（-20.5%）。
+
+### CI
+- 升级 GitHub Actions 至 Node.js 24 原生版本。
+- 修复 benchmark workflow：更正 bench 名称，移除不存在的 bench，启用 Node.js 24。
+
 ## [0.9.0] - 2026-04-04
 
 ### Changed

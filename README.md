@@ -21,7 +21,7 @@
 
 ```toml
 [dependencies]
-dm-database-parser-sqllog = "0.9"
+dm-database-parser-sqllog = "0.9.1"
 ```
 
 ### 作为库使用
