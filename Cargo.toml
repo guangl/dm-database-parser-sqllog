@@ -27,8 +27,13 @@ name = "dm_database_parser_sqllog"
 path = "src/lib.rs"
 crate-type = ["lib"]
 
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
 [dependencies]
 atoi = "2.0.0"
+fast-float = "0.2"
 memchr = "2.7.6"
 memmap2 = "0.9.9"
 simdutf8 = "0.1.5"

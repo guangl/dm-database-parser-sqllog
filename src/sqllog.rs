@@ -2,8 +2,8 @@ use atoi::atoi;
 use encoding::DecoderTrap;
 use encoding::Encoding;
 use encoding::all::GB18030;
-use memchr::memmem::Finder;
-use memchr::{memchr, memrchr};
+use memchr::memchr;
+use memchr::memmem::{Finder, FinderRev};
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
 use std::sync::LazyLock;
@@ -14,6 +14,14 @@ use crate::parser::FileEncodingHint;
 static FINDER_EXECTIME: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"EXECTIME:"));
 static FINDER_ROWCOUNT: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"ROWCOUNT:"));
 static FINDER_EXEC_ID: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"EXEC_ID:"));
+
+/// Pre-built reverse SIMD finders for split detection (include trailing space to avoid false positives).
+static FINDER_REV_EXECTIME: LazyLock<FinderRev<'static>> =
+    LazyLock::new(|| FinderRev::new(b"EXECTIME: "));
+static FINDER_REV_ROWCOUNT: LazyLock<FinderRev<'static>> =
+    LazyLock::new(|| FinderRev::new(b"ROWCOUNT: "));
+static FINDER_REV_EXEC_ID: LazyLock<FinderRev<'static>> =
+    LazyLock::new(|| FinderRev::new(b"EXEC_ID: "));
 
 /// SQL 日志记录
 ///
@@ -205,19 +213,20 @@ impl<'a> Sqllog<'a> {
         let data = &self.content_raw;
         let len = data.len();
         let start = len.saturating_sub(256);
-        let window = &data[start..len];
-        let mut tail = window.len();
+        let window = &data[start..];
 
-        // Search backwards for each keyword in decreasing order of position
-        for keyword in [
-            b"EXEC_ID".as_ref(),
-            b"ROWCOUNT".as_ref(),
-            b"EXECTIME".as_ref(),
+        // Use SIMD reverse finders; take the leftmost (minimum) match position.
+        let mut earliest = window.len();
+        for finder in [
+            &*FINDER_REV_EXECTIME,
+            &*FINDER_REV_ROWCOUNT,
+            &*FINDER_REV_EXEC_ID,
         ] {
-            tail = find_keyword_end_backward(window, tail, keyword).unwrap_or(tail);
+            if let Some(idx) = finder.rfind(window) {
+                earliest = earliest.min(idx);
+            }
         }
-
-        start + tail
+        start + earliest
     }
 }
 
@@ -236,8 +245,21 @@ unsafe fn decode_content_bytes<'a>(
     encoding: FileEncodingHint,
 ) -> Cow<'a, str> {
     match encoding {
-        FileEncodingHint::Utf8 | FileEncodingHint::Auto => match simd_from_utf8(bytes) {
-            Ok(s) => {
+        FileEncodingHint::Utf8 => {
+            // File was already validated as UTF-8 during `from_path`; skip per-slice re-validation.
+            if is_borrowed {
+                unsafe {
+                    Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        bytes.as_ptr(),
+                        bytes.len(),
+                    )))
+                }
+            } else {
+                unsafe { Cow::Owned(std::str::from_utf8_unchecked(bytes).to_string()) }
+            }
+        }
+        FileEncodingHint::Auto => match simd_from_utf8(bytes) {
+            Ok(_) => {
                 if is_borrowed {
                     unsafe {
                         Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
@@ -246,7 +268,7 @@ unsafe fn decode_content_bytes<'a>(
                         )))
                     }
                 } else {
-                    Cow::Owned(s.to_string())
+                    unsafe { Cow::Owned(std::str::from_utf8_unchecked(bytes).to_string()) }
                 }
             }
             Err(_) => Cow::Owned(String::from_utf8_lossy(bytes).into_owned()),
@@ -256,28 +278,6 @@ unsafe fn decode_content_bytes<'a>(
             Err(_) => Cow::Owned(String::from_utf8_lossy(bytes).into_owned()),
         },
     }
-}
-
-/// Scan `window[..within]` backwards for `keyword:` followed by a space.
-/// Returns the offset just before the keyword (the new split boundary) if found.
-#[inline]
-fn find_keyword_end_backward(window: &[u8], within: usize, keyword: &[u8]) -> Option<usize> {
-    let klen = keyword.len();
-    let mut search_end = within;
-    while let Some(idx) = memrchr(b':', &window[..search_end]) {
-        if idx >= klen
-            && &window[idx - klen..idx] == keyword
-            && idx + 1 < window.len()
-            && window[idx + 1] == b' '
-        {
-            return Some(idx - klen);
-        }
-        if idx == 0 {
-            break;
-        }
-        search_end = idx;
-    }
-    None
 }
 
 /// Parse `EXECTIME`, `ROWCOUNT`, `EXEC_ID` from a raw indicators byte slice.
@@ -295,7 +295,7 @@ fn parse_indicators_from_bytes(ind: &[u8]) -> Option<PerformanceMetrics<'static>
         let ss = idx + 9;
         if let Some(pi) = memchr(b'(', &ind[ss..]) {
             let val = ind[ss..ss + pi].trim_ascii();
-            if let Ok(t) = unsafe { std::str::from_utf8_unchecked(val) }.parse::<f32>() {
+            if let Ok(t) = fast_float::parse::<f32, _>(val) {
                 out.exectime = t;
                 found = true;
             }

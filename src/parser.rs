@@ -284,18 +284,16 @@ fn parse_record_with_hint<'a>(
     // SAFETY: meta_bytes is a sub-slice of first_line, which is 'a.
     // Use the provided encoding hint (file-level autodetection) to decide how to decode meta bytes.
     let meta_raw = match encoding_hint {
-        FileEncodingHint::Utf8 => match simd_from_utf8(meta_bytes) {
-            Ok(s) => {
-                // SAFETY: meta_bytes is a sub-slice of first_line which lives for 'a
-                unsafe {
-                    Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                        s.as_ptr(),
-                        s.len(),
-                    )))
-                }
+        FileEncodingHint::Utf8 => {
+            // File already validated as UTF-8 during `from_path`; skip per-slice re-validation.
+            // SAFETY: meta_bytes is a sub-slice of first_line which lives for 'a
+            unsafe {
+                Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                    meta_bytes.as_ptr(),
+                    meta_bytes.len(),
+                )))
             }
-            Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
-        },
+        }
         FileEncodingHint::Gb18030 => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
             Ok(s) => Cow::Owned(s),
             Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
@@ -342,24 +340,34 @@ fn parse_record_with_hint<'a>(
             let inner = &s[1..end_idx];
             // Accept token without spaces and reasonable length
             if !inner.contains(&b' ') && inner.len() <= 32 {
-                tag = match simd_from_utf8(inner) {
-                    Ok(st) => Some(unsafe {
+                tag = match encoding_hint {
+                    FileEncodingHint::Utf8 => {
+                        // File already validated as UTF-8; skip re-validation.
                         // SAFETY: inner is a sub-slice of record_bytes which lives for 'a
-                        Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                            st.as_ptr(),
-                            st.len(),
-                        )))
-                    }),
-                    Err(_) => match encoding_hint {
-                        FileEncodingHint::Gb18030 => {
-                            match GB18030.decode(inner, DecoderTrap::Strict) {
-                                Ok(s) => Some(Cow::Owned(s)),
-                                Err(_) => {
-                                    Some(Cow::Owned(String::from_utf8_lossy(inner).into_owned()))
+                        Some(unsafe {
+                            Cow::Borrowed(std::str::from_utf8_unchecked(
+                                std::slice::from_raw_parts(inner.as_ptr(), inner.len()),
+                            ))
+                        })
+                    }
+                    _ => match simd_from_utf8(inner) {
+                        Ok(st) => Some(unsafe {
+                            // SAFETY: inner is a sub-slice of record_bytes which lives for 'a
+                            Cow::Borrowed(std::str::from_utf8_unchecked(
+                                std::slice::from_raw_parts(st.as_ptr(), st.len()),
+                            ))
+                        }),
+                        Err(_) => match encoding_hint {
+                            FileEncodingHint::Gb18030 => {
+                                match GB18030.decode(inner, DecoderTrap::Strict) {
+                                    Ok(s) => Some(Cow::Owned(s)),
+                                    Err(_) => Some(Cow::Owned(
+                                        String::from_utf8_lossy(inner).into_owned(),
+                                    )),
                                 }
                             }
-                        }
-                        _ => Some(Cow::Owned(String::from_utf8_lossy(inner).into_owned())),
+                            _ => Some(Cow::Owned(String::from_utf8_lossy(inner).into_owned())),
+                        },
                     },
                 };
                 // Move past the closing ']' and any following ASCII whitespace
