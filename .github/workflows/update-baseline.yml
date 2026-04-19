@@ -1,0 +1,76 @@
+name: Update Benchmark Baseline
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  update-baseline:
+    name: Update Baseline
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run benchmarks
+        run: cargo bench --bench parser_benchmark
+
+      - name: Update baseline.json from estimates
+        run: |
+          python3 - <<'PYEOF'
+          import json, glob, os
+
+          baselines = {}
+          # 从所有 estimates.json 提取 mean.point_estimate
+          # 路径格式：target/criterion/{group}/{bench}/new/estimates.json
+          for path in glob.glob('target/criterion/**/**/new/estimates.json', recursive=True):
+              parts = path.replace('\\', '/').split('/')
+              # parts: ['target', 'criterion', '{group}', '{bench}', 'new', 'estimates.json']
+              if len(parts) < 6:
+                  continue
+              group = parts[-4]
+              bench = parts[-3]
+              # 跳过 _rps 后缀变体（不纳入门禁基线，D-09）
+              if bench.endswith('_rps'):
+                  continue
+              key = f'{group}/{bench}'
+              with open(path) as f:
+                  data = json.load(f)
+              baselines[key] = data['mean']['point_estimate']
+
+          with open('benchmarks/baseline.json', 'w') as f:
+              json.dump(baselines, f, indent=4, sort_keys=True)
+
+          print('Updated baseline.json:')
+          for k, v in sorted(baselines.items()):
+              print(f'  {k}: {v:.0f} ns')
+          PYEOF
+
+      - name: Commit updated baseline
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add benchmarks/baseline.json
+          git diff --staged --quiet || git commit -m "chore(bench): update CI baseline [skip ci]"
+          git push

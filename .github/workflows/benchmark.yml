@@ -48,6 +48,9 @@ jobs:
       - name: Run parser benchmarks
         run: cargo bench --bench parser_benchmark
 
+      - name: Check regression vs baseline
+        run: bash scripts/check-regression.sh
+
       - name: Upload benchmark results
         uses: actions/upload-artifact@v7
         if: always()
