@@ -17,6 +17,26 @@ fn generate_synthetic_log(target_bytes: usize) -> NamedTempFile {
     tmp
 }
 
+fn generate_synthetic_log_multiline(target_bytes: usize) -> NamedTempFile {
+    let mut tmp = NamedTempFile::new().expect("tmpfile");
+    let single_line_record = b"2025-08-12 10:57:09.548 (EP[0] sess:0x178ebca0 thrd:757455 user:BENCHMARK trxid:0 stmt:0x285eb060 appname:bench) [SEL] SELECT id, name, value FROM benchmark_table WHERE id = 12345 EXECTIME: 1(ms) ROWCOUNT: 1(rows) EXEC_ID: 289655178.\n";
+    let multi_line_record = b"2025-08-12 10:57:09.548 (EP[0] sess:0x178ebca0 thrd:757455 user:BENCHMARK trxid:0 stmt:0x285eb060 appname:bench) [SEL] SELECT\n    t1.id,\n    t2.name\nFROM benchmark_table t1\nJOIN other_table t2 ON t1.id = t2.id\nWHERE t1.id = 12345 EXECTIME: 1(ms) ROWCOUNT: 1(rows) EXEC_ID: 289655178.\n";
+    let mut written = 0;
+    let mut record_index: usize = 0;
+    while written < target_bytes {
+        let record = if record_index % 5 == 0 {
+            multi_line_record.as_ref()
+        } else {
+            single_line_record.as_ref()
+        };
+        tmp.write_all(record).expect("write");
+        written += record.len();
+        record_index += 1;
+    }
+    tmp.flush().expect("flush");
+    tmp
+}
+
 fn benchmark_parser(c: &mut Criterion) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let real_path = root.join("sqllogs").join("dmsql_DSC0_20250812_092516.log");
