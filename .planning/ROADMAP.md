@@ -30,8 +30,8 @@
   4. CI 对比 `baseline.json`，吞吐退化超过 5% 时 pipeline 失败并报告具体数值
 **Plans**: 2 plans
 Plans:
-- [ ] 01-01-PLAN.md — 扩展 benchmark 变体（MEAS-01/02/03）：多行语料库 + Throughput 双单位 + metrics 变体
-- [ ] 01-02-PLAN.md — CI 回归门禁基础设施（MEAS-04）：check-regression.sh + benchmark.yml 门禁 + update-baseline.yml
+- [x] 01-01-PLAN.md — 扩展 benchmark 变体（MEAS-01/02/03）：多行语料库 + Throughput 双单位 + metrics 变体
+- [x] 01-02-PLAN.md — CI 回归门禁基础设施（MEAS-04）：check-regression.sh + benchmark.yml 门禁 + update-baseline.yml
 
 ### Phase 2: Correctness
 **Goal**: 消除 unsafe 解码路径的已知正确性风险，使后续任意热路径改动不会踩到未定义行为
