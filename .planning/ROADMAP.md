@@ -28,7 +28,10 @@
   2. benchmark 包含调用 `parse_performance_metrics()` 的变体，反映真实热路径工作量
   3. benchmark 使用含多行 SQL 的合成语料库，而非只有均匀单行记录
   4. CI 对比 `baseline.json`，吞吐退化超过 5% 时 pipeline 失败并报告具体数值
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 01-01-PLAN.md — 扩展 benchmark 变体（MEAS-01/02/03）：多行语料库 + Throughput 双单位 + metrics 变体
+- [ ] 01-02-PLAN.md — CI 回归门禁基础设施（MEAS-04）：check-regression.sh + benchmark.yml 门禁 + update-baseline.yml
 
 ### Phase 2: Correctness
 **Goal**: 消除 unsafe 解码路径的已知正确性风险，使后续任意热路径改动不会踩到未定义行为
@@ -78,7 +81,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Measurement | 0/? | Not started | - |
+| 1. Measurement | 0/2 | Not started | - |
 | 2. Correctness | 0/? | Not started | - |
 | 3. HotPath | 0/? | Not started | - |
 | 4. CoreAlgo | 0/? | Not started | - |
@@ -111,3 +114,4 @@
 
 ---
 *Created: 2026-04-18*
+*Updated: 2026-04-19 — Phase 1 plans finalized (2 plans)*
