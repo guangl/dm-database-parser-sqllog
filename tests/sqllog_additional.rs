@@ -129,6 +129,7 @@ fn tag_extraction_and_body_trim() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn file_encoding_detection_gb18030() {
     use dm_database_parser_sqllog::LogParser;
     use encoding::all::GB18030;
@@ -156,6 +157,7 @@ fn file_encoding_detection_gb18030() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn file_encoding_detection_utf8() {
     use dm_database_parser_sqllog::LogParser;
     use std::io::Write;

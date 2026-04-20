@@ -33,6 +33,7 @@ fn indicators_not_strictly_formatted_should_not_split_body() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn probable_record_start_line_and_iterator_singleline_detection() {
     // 第二条记录紧随其后，验证迭代器以单行方式切分
     let mut file = NamedTempFile::new().unwrap();
