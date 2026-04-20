@@ -9,7 +9,7 @@
 
 ## Phases
 
-- [ ] **Phase 1: Measurement** - 建立可信的基准测量基础设施，确保后续优化有可验证的数据支撑
+- [x] **Phase 1: Measurement** - 建立可信的基准测量基础设施，确保后续优化有可验证的数据支撑 *(completed 2026-04-20)*
 - [ ] **Phase 2: Correctness** - 修复 unsafe 路径的正确性风险，为后续热路径改动建立安全地基
 - [ ] **Phase 3: HotPath** - 零风险热路径微优化，可逐一回滚，每项改动独立可验证
 - [ ] **Phase 4: CoreAlgo** - 核心算法重写，预期最高 ROI（15–45%）的单线程吞吐提升
@@ -81,7 +81,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Measurement | 0/2 | Not started | - |
+| 1. Measurement | 2/2 | Complete | 2026-04-20 |
 | 2. Correctness | 0/? | Not started | - |
 | 3. HotPath | 0/? | Not started | - |
 | 4. CoreAlgo | 0/? | Not started | - |
