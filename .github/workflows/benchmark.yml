@@ -52,7 +52,7 @@ jobs:
         run: bash scripts/check-regression.sh
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: benchmark-results
