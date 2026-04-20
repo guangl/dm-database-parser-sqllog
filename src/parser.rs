@@ -103,71 +103,75 @@ impl<'a> Iterator for LogIterator<'a> {
     type Item = Result<Sqllog<'a>, ParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.data.len() {
-            return None;
-        }
-
-        let data = &self.data[self.pos..];
-        let mut scan_pos = 0;
-        let mut found_next = None;
-        let mut is_multiline = false;
-
-        while let Some(idx) = memchr(b'\n', &data[scan_pos..]) {
-            let newline_idx = scan_pos + idx;
-            let next_line_start = newline_idx + 1;
-
-            if next_line_start >= data.len() {
-                break;
+        loop {
+            if self.pos >= self.data.len() {
+                return None;
             }
 
-            // Check if next line starts with timestamp
-            let check_len = std::cmp::min(23, data.len() - next_line_start);
-            if check_len == 23 {
-                let next_bytes = &data[next_line_start..next_line_start + 23];
-                // Fast check: 20xx and separators
-                if next_bytes[0] == b'2'
-                    && next_bytes[1] == b'0'
-                    && next_bytes[4] == b'-'
-                    && next_bytes[7] == b'-'
-                    && next_bytes[10] == b' '
-                    && next_bytes[13] == b':'
-                    && next_bytes[16] == b':'
-                    && next_bytes[19] == b'.'
-                {
-                    found_next = Some(newline_idx);
+            let data = &self.data[self.pos..];
+            let mut scan_pos = 0;
+            let mut found_next = None;
+            let mut is_multiline = false;
+
+            while let Some(idx) = memchr(b'\n', &data[scan_pos..]) {
+                let newline_idx = scan_pos + idx;
+                let next_line_start = newline_idx + 1;
+
+                if next_line_start >= data.len() {
                     break;
                 }
+
+                // Check if next line starts with timestamp
+                let check_len = std::cmp::min(23, data.len() - next_line_start);
+                if check_len == 23 {
+                    let next_bytes = &data[next_line_start..next_line_start + 23];
+                    // Fast check: 20xx and separators
+                    if next_bytes[0] == b'2'
+                        && next_bytes[1] == b'0'
+                        && next_bytes[4] == b'-'
+                        && next_bytes[7] == b'-'
+                        && next_bytes[10] == b' '
+                        && next_bytes[13] == b':'
+                        && next_bytes[16] == b':'
+                        && next_bytes[19] == b'.'
+                    {
+                        found_next = Some(newline_idx);
+                        break;
+                    }
+                }
+
+                is_multiline = true;
+                scan_pos = next_line_start;
             }
 
-            is_multiline = true;
-            scan_pos = next_line_start;
+            let (record_end, next_start) = if let Some(idx) = found_next {
+                (idx, idx + 1)
+            } else {
+                (data.len(), data.len())
+            };
+
+            let record_slice = &data[..record_end];
+            self.pos += next_start;
+
+            // Trim trailing CR if present
+            let record_slice = if record_slice.ends_with(b"\r") {
+                &record_slice[..record_slice.len() - 1]
+            } else {
+                record_slice
+            };
+
+            // Skip empty slices iteratively instead of recursing to avoid stack overflow
+            // when the file contains many consecutive blank lines.
+            if record_slice.is_empty() {
+                continue;
+            }
+
+            return Some(parse_record_with_hint(
+                record_slice,
+                is_multiline,
+                self.encoding,
+            ));
         }
-
-        let (record_end, next_start) = if let Some(idx) = found_next {
-            (idx, idx + 1)
-        } else {
-            (data.len(), data.len())
-        };
-
-        let record_slice = &data[..record_end];
-        self.pos += next_start;
-
-        // Trim trailing CR if present
-        let record_slice = if record_slice.ends_with(b"\r") {
-            &record_slice[..record_slice.len() - 1]
-        } else {
-            record_slice
-        };
-
-        if record_slice.is_empty() {
-            return self.next();
-        }
-
-        Some(parse_record_with_hint(
-            record_slice,
-            is_multiline,
-            self.encoding,
-        ))
     }
 }
 
