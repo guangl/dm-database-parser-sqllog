@@ -41,7 +41,10 @@ Plans:
   1. 编码检测不再只采样前 64 KB，大文件（>64 KB）中的 GB18030 内容能被正确识别
   2. CI 运行 Miri，覆盖 unsafe 解码路径，Miri 检查无报错
   3. `find_indicators_split` 有测试用例覆盖 SQL body 内含 `EXECTIME:` 等指标关键字的场景，且结果正确
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 02-01-PLAN.md — 代码修复（CORR-01/03）：全文件编码检测 + find_indicators_split 验证守卫 + 6 条新测试
+- [ ] 02-02-PLAN.md — Miri CI 基础设施（CORR-02）：miri.yml 作业 + 五个测试文件 cfg 标注
 
 ### Phase 3: HotPath
 **Goal**: 通过低风险的内联提示、早退逻辑和 mmap 建议，消除热路径中的无谓开销
@@ -82,7 +85,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Measurement | 2/2 | Complete | 2026-04-20 |
-| 2. Correctness | 0/? | Not started | - |
+| 2. Correctness | 0/2 | In progress | - |
 | 3. HotPath | 0/? | Not started | - |
 | 4. CoreAlgo | 0/? | Not started | - |
 | 5. Parallel | 0/? | Not started | - |
@@ -114,4 +117,4 @@ Plans:
 
 ---
 *Created: 2026-04-18*
-*Updated: 2026-04-19 — Phase 1 plans finalized (2 plans)*
+*Updated: 2026-04-20 — Phase 2 plans finalized (2 plans)*
