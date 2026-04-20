@@ -125,6 +125,9 @@ impl<'a> Sqllog<'a> {
 
         let to_cow = |bytes: &[u8]| -> Cow<'a, str> {
             if is_borrowed {
+                // For Utf8 / Auto encoding: meta_raw is Cow::Borrowed — bytes is a sub-slice
+                // of the memory-mapped buffer that lives for 'a.  The file was validated as
+                // UTF-8 during `from_path`, so the unchecked conversion is sound.
                 unsafe {
                     Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
                         bytes.as_ptr(),
@@ -132,7 +135,14 @@ impl<'a> Sqllog<'a> {
                     )))
                 }
             } else {
-                unsafe { Cow::Owned(std::str::from_utf8_unchecked(bytes).to_string()) }
+                // For Gb18030 / Auto-fallback encoding: meta_raw is Cow::Owned (already decoded
+                // to a valid UTF-8 String).  We must NOT transmute the lifetime to 'a because
+                // the Owned String lives only as long as `self`, not 'a.  Return an owned copy.
+                Cow::Owned(
+                    std::str::from_utf8(bytes)
+                        .expect("meta_raw is always valid UTF-8")
+                        .to_string(),
+                )
             }
         };
 
