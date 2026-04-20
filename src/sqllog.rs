@@ -15,6 +15,11 @@ static FINDER_EXECTIME: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new
 static FINDER_ROWCOUNT: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"ROWCOUNT:"));
 static FINDER_EXEC_ID: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"EXEC_ID:"));
 
+/// Maximum byte length of an indicators section.
+/// Typical indicators ("EXECTIME: x(ms) ROWCOUNT: y(rows) EXEC_ID: z.") are ≤ 80 bytes.
+/// 256 is a conservative upper bound that covers unusual padding or long EXEC_ID values.
+const INDICATORS_WINDOW: usize = 256;
+
 /// Pre-built reverse SIMD finders for split detection (include trailing space to avoid false positives).
 static FINDER_REV_EXECTIME: LazyLock<FinderRev<'static>> =
     LazyLock::new(|| FinderRev::new(b"EXECTIME: "));
@@ -222,7 +227,7 @@ impl<'a> Sqllog<'a> {
     fn find_indicators_split(&self) -> usize {
         let data = &self.content_raw;
         let len = data.len();
-        let start = len.saturating_sub(256);
+        let start = len.saturating_sub(INDICATORS_WINDOW);
         let window = &data[start..];
 
         // Use SIMD reverse finders; take the leftmost (minimum) match position.
