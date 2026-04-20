@@ -284,9 +284,11 @@ fn parse_record_with_hint<'a>(
     };
 
     let meta_bytes = &first_line[meta_start + 1..meta_end];
-    // Lazy parsing: store raw bytes
-    // SAFETY: meta_bytes is a sub-slice of first_line, which is 'a.
-    // Use the provided encoding hint (file-level autodetection) to decide how to decode meta bytes.
+    // Lazy parsing: store raw bytes as a Cow<'a, str>.
+    // For Utf8 / Auto-UTF8 encoding: meta_bytes is a sub-slice of the memory-mapped buffer
+    // (raw UTF-8 bytes) that lives for 'a — borrowing is sound.
+    // For Gb18030 / Auto-GB18030 encoding: GB18030.decode() produces a new owned String, so
+    // meta_raw becomes Cow::Owned; the 'a lifetime is NOT extended to that allocation.
     let meta_raw = match encoding_hint {
         FileEncodingHint::Utf8 => {
             // File already validated as UTF-8 during `from_path`; skip per-slice re-validation.
