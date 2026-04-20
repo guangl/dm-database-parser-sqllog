@@ -30,10 +30,10 @@ progress:
 
 ## Current Position
 
-Phase: 02 (correctness) — Ready to plan
+Phase: 02 (correctness) — Ready to execute
 **Current Phase:** 02
 **Current Plan:** 1
-**Phase Status:** Phase 1 complete — ready for Phase 2
+**Phase Status:** Phase 2 planned (2 plans, Wave 1) — ready for execution
 **Milestone Status:** In progress
 
 ```
@@ -89,8 +89,8 @@ None.
 
 ## Session Continuity
 
-**Last updated:** 2026-04-20 — Phase 1 complete (2/2 plans verified, 4/4 成功标准通过)
-**Next action:** `/gsd-discuss-phase 2` — discuss Phase 2 (Correctness) before planning
+**Last updated:** 2026-04-20 — Phase 2 planned (2 plans: CORR-01/03 code fixes + CORR-02 Miri CI, verification passed)
+**Next action:** `/gsd-execute-phase 2` — execute Phase 2 (Correctness)
 
 ---
 *Updated: 2026-04-18 after roadmap creation*
