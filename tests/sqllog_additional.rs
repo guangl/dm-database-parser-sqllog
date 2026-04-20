@@ -158,6 +158,38 @@ fn file_encoding_detection_gb18030() {
 
 #[test]
 #[cfg(not(miri))]
+fn encoding_detection_gb18030_after_64kb_boundary() {
+    use dm_database_parser_sqllog::LogParser;
+    use encoding::all::GB18030;
+    use encoding::{EncoderTrap, Encoding};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    // 用 ASCII 记录填充超过 64 KB
+    let ascii_record = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:ascii trxid:0 stmt:0 appname:app) SELECT 1;\n";
+    let repeat_count = 65536 / ascii_record.len() + 2;
+
+    let username = "用户";
+    let user_bytes = GB18030.encode(username, EncoderTrap::Strict).unwrap();
+    let mut gb_line: Vec<u8> = b"2025-11-17 16:09:42.000 (EP[0] sess:2 thrd:2 user:".to_vec();
+    gb_line.extend_from_slice(&user_bytes);
+    gb_line.extend_from_slice(b" trxid:0 stmt:0 appname:app) SELECT 2;\n");
+
+    let mut tmp = NamedTempFile::new().unwrap();
+    for _ in 0..repeat_count {
+        tmp.write_all(ascii_record.as_bytes()).unwrap();
+    }
+    tmp.write_all(&gb_line).unwrap();
+    tmp.as_file().sync_all().unwrap();
+
+    let parser = LogParser::from_path(tmp.path()).unwrap();
+    let records: Vec<_> = parser.iter().collect();
+    let last = records.last().unwrap().as_ref().unwrap();
+    assert_eq!(last.parse_meta().username, username);
+}
+
+#[test]
+#[cfg(not(miri))]
 fn file_encoding_detection_utf8() {
     use dm_database_parser_sqllog::LogParser;
     use std::io::Write;

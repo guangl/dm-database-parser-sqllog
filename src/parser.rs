@@ -34,8 +34,8 @@ impl LogParser {
         let file = File::open(path).map_err(|e| ParseError::IoError(e.to_string()))?;
         let mmap = unsafe { Mmap::map(&file).map_err(|e| ParseError::IoError(e.to_string()))? };
 
-        // Sample the first 64 KB to determine encoding.
-        let sample = &mmap[..mmap.len().min(65536)];
+        // Scan entire file to eliminate misclassification from early-section sampling.
+        let sample = &mmap[..];
         let encoding = if simd_from_utf8(sample).is_ok() {
             FileEncodingHint::Utf8
         } else {
