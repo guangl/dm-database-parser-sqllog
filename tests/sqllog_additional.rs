@@ -160,7 +160,10 @@ fn file_encoding_detection_gb18030() {
 fn find_indicators_split_exectime_keyword_in_sql_body_no_indicators() {
     let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) SELECT * FROM t WHERE col = 'EXECTIME: slow'\n";
     let record = parse_record(raw.as_bytes()).unwrap();
-    assert_eq!(record.body(), "SELECT * FROM t WHERE col = 'EXECTIME: slow'\n");
+    assert_eq!(
+        record.body(),
+        "SELECT * FROM t WHERE col = 'EXECTIME: slow'\n"
+    );
     assert!(record.parse_indicators().is_none());
 }
 
@@ -168,7 +171,10 @@ fn find_indicators_split_exectime_keyword_in_sql_body_no_indicators() {
 fn find_indicators_split_rowcount_keyword_in_sql_body_no_indicators() {
     let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) SELECT * FROM t WHERE cnt = 'ROWCOUNT: many'\n";
     let record = parse_record(raw.as_bytes()).unwrap();
-    assert_eq!(record.body(), "SELECT * FROM t WHERE cnt = 'ROWCOUNT: many'\n");
+    assert_eq!(
+        record.body(),
+        "SELECT * FROM t WHERE cnt = 'ROWCOUNT: many'\n"
+    );
     assert!(record.parse_indicators().is_none());
 }
 
