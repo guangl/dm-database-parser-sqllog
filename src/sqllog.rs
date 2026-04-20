@@ -226,7 +226,14 @@ impl<'a> Sqllog<'a> {
                 earliest = earliest.min(idx);
             }
         }
-        start + earliest
+        let split = start + earliest;
+        // Only accept the split if the trailing slice contains parseable indicators.
+        // If parse_indicators_from_bytes returns None, the "indicator-looking" text
+        // is part of the SQL body — return len (no split).
+        if split < len && parse_indicators_from_bytes(&data[split..]).is_none() {
+            return len;
+        }
+        split
     }
 }
 
