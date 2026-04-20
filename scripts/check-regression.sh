@@ -29,6 +29,12 @@ while IFS= read -r bench_key; do
 
     current_ns=$(jq -r '.mean.point_estimate' "$estimates_file")
 
+    # 防护：任一值为 null 时跳过（字段缺失或结构变化）
+    if [[ "$current_ns" == "null" || "$baseline_ns" == "null" ]]; then
+        echo "WARNING: could not read values for $bench_key (null), skipping"
+        continue
+    fi
+
     # 计算退化百分比：(current - baseline) / baseline * 100
     regression=$(awk "BEGIN { printf \"%.1f\", ($current_ns - $baseline_ns) / $baseline_ns * 100 }")
 
