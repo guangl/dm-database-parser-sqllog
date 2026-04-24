@@ -227,6 +227,19 @@ impl<'a> Sqllog<'a> {
     fn find_indicators_split(&self) -> usize {
         let data = &self.content_raw;
         let len = data.len();
+
+        // HOT-01: O(1) 早退 — DM 格式中有指标的记录以 '.' 结尾（EXEC_ID: N.）
+        // 或以 ')' 结尾（仅 EXECTIME/ROWCOUNT，格式为 N(ms)/N(rows)）。
+        // 跳过末尾 \n/\r，取最后一个有效字节；既非 '.' 也非 ')' 则无指标，直接返回。
+        let last_meaningful = data
+            .iter()
+            .rev()
+            .find(|&&b| b != b'\n' && b != b'\r')
+            .copied();
+        if last_meaningful != Some(b'.') && last_meaningful != Some(b')') {
+            return len;
+        }
+
         let start = len.saturating_sub(INDICATORS_WINDOW);
         let window = &data[start..];
 

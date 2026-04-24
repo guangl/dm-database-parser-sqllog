@@ -126,3 +126,61 @@ fn performance_metrics_ora_tag_only_colon_space_sql_empty_after_strip() {
     let pm = rec.parse_performance_metrics();
     assert_eq!(pm.sql, "");
 }
+
+// ── HOT-01 早退逻辑测试 ────────────────────────────────────────────────────────
+
+/// 末尾为纯 SQL 文本（无 '.' 结尾）的记录应被早退，body_len == content_raw 全长
+#[test]
+fn hot01_early_exit_no_dot_suffix() {
+    // SQL 语句末尾为 ';'，不含指标，应早退（无截断）
+    let raw = build_record("SELECT * FROM users WHERE id = 1;", "");
+    let rec = parse_record(&raw).unwrap();
+    let pm = rec.parse_performance_metrics();
+    // 无指标时，sql == 全部 content_raw
+    assert_eq!(pm.exectime, 0.0);
+    assert_eq!(pm.rowcount, 0);
+    assert_eq!(pm.exec_id, 0);
+    // body_len() 应等于 content_raw 长度（早退路径，无截断）
+    assert_eq!(rec.body_len(), rec.content_raw.len());
+}
+
+/// 末尾为 '\n' 的无指标记录应被早退
+#[test]
+fn hot01_early_exit_newline_suffix() {
+    let header =
+        b"2025-11-17 16:09:41.123 (EP[1] sess:123 thrd:456 user:alice trxid:789 stmt:0x1 appname:bench) ";
+    let mut raw = Vec::new();
+    raw.extend_from_slice(header);
+    raw.extend_from_slice(b"SELECT 1;\n");
+    let rec = parse_record(&raw).unwrap();
+    let pm = rec.parse_performance_metrics();
+    assert_eq!(pm.exec_id, 0);
+    assert_eq!(rec.body_len(), rec.content_raw.len());
+}
+
+/// 末尾为 '.' 但无真实指标的记录，CORR-03 守卫最终返回全文（不截断）
+#[test]
+fn hot01_dot_suffix_no_real_indicators_guarded() {
+    // SQL 以 '.' 结尾（URL 或语句结尾），不含指标关键字
+    let raw = build_record("SELECT url FROM t WHERE url = 'http://example.com'.", "");
+    let rec = parse_record(&raw).unwrap();
+    let pm = rec.parse_performance_metrics();
+    // CORR-03 守卫应拦截假阳性，返回全文
+    assert_eq!(pm.exec_id, 0);
+    assert_eq!(pm.exectime, 0.0);
+}
+
+/// 末尾为 '.' 且含真实指标的记录，应正常分割，指标被正确解析
+#[test]
+fn hot01_dot_suffix_with_real_indicators() {
+    let raw = build_record(
+        "SELECT 1 FROM T ",
+        "EXECTIME: 2.5(ms) ROWCOUNT: 5(rows) EXEC_ID: 77.",
+    );
+    let rec = parse_record(&raw).unwrap();
+    let pm = rec.parse_performance_metrics();
+    assert!((pm.exectime - 2.5).abs() < 1e-6);
+    assert_eq!(pm.rowcount, 5);
+    assert_eq!(pm.exec_id, 77);
+    assert_eq!(pm.sql, "SELECT 1 FROM T ");
+}
