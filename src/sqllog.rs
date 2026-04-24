@@ -3,7 +3,8 @@ use encoding::DecoderTrap;
 use encoding::Encoding;
 use encoding::all::GB18030;
 use memchr::memchr;
-use memchr::memmem::{Finder, FinderRev};
+use memchr::memrchr;
+use memchr::memmem::Finder;
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
 use std::sync::LazyLock;
@@ -20,13 +21,6 @@ static FINDER_EXEC_ID: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(
 /// 256 is a conservative upper bound that covers unusual padding or long EXEC_ID values.
 const INDICATORS_WINDOW: usize = 256;
 
-/// Pre-built reverse SIMD finders for split detection (include trailing space to avoid false positives).
-static FINDER_REV_EXECTIME: LazyLock<FinderRev<'static>> =
-    LazyLock::new(|| FinderRev::new(b"EXECTIME: "));
-static FINDER_REV_ROWCOUNT: LazyLock<FinderRev<'static>> =
-    LazyLock::new(|| FinderRev::new(b"ROWCOUNT: "));
-static FINDER_REV_EXEC_ID: LazyLock<FinderRev<'static>> =
-    LazyLock::new(|| FinderRev::new(b"EXEC_ID: "));
 
 /// SQL 日志记录
 ///
@@ -227,24 +221,28 @@ impl<'a> Sqllog<'a> {
     fn find_indicators_split(&self) -> usize {
         let data = &self.content_raw;
         let len = data.len();
+
+        // HOT-01: O(1) 早退 — DM 格式中有指标的记录以 '.' 结尾（EXEC_ID: N.）
+        // 或以 ')' 结尾（仅 EXECTIME/ROWCOUNT，格式为 N(ms)/N(rows)）。
+        // 跳过末尾 \n/\r，取最后一个有效字节；既非 '.' 也非 ')' 则无指标，直接返回。
+        let last_meaningful = data
+            .iter()
+            .rev()
+            .find(|&&b| b != b'\n' && b != b'\r')
+            .copied();
+        if last_meaningful != Some(b'.') && last_meaningful != Some(b')') {
+            return len;
+        }
+
         let start = len.saturating_sub(INDICATORS_WINDOW);
         let window = &data[start..];
 
-        // Use SIMD reverse finders; take the leftmost (minimum) match position.
-        let mut earliest = window.len();
-        for finder in [
-            &*FINDER_REV_EXECTIME,
-            &*FINDER_REV_ROWCOUNT,
-            &*FINDER_REV_EXEC_ID,
-        ] {
-            if let Some(idx) = finder.rfind(window) {
-                earliest = earliest.min(idx);
-            }
-        }
+        // HOT-02: 单次反向扫描 ':' 字节，检查关键字前缀，记录最左命中位置。
+        // 替代 3 次独立 FinderRev::rfind 调用，减少 SIMD 启动开销。
+        let earliest = scan_earliest_indicator(window);
+
         let split = start + earliest;
-        // Only accept the split if the trailing slice contains parseable indicators.
-        // If parse_indicators_from_bytes returns None, the "indicator-looking" text
-        // is part of the SQL body — return len (no split).
+        // CORR-03 验证守卫：假阳性（如 SQL 以指标关键字结尾）时 fallback 到全文。
         if split < len && parse_indicators_from_bytes(&data[split..]).is_none() {
             return len;
         }
@@ -253,6 +251,49 @@ impl<'a> Sqllog<'a> {
 }
 
 // ── Module-level helpers ──────────────────────────────────────────────────────
+
+/// 在 window 内单次反向扫描 ':' 字节，匹配已知指标关键字前缀。
+///
+/// 对每个关键字只取最右命中（即从右向左扫描的第一次命中），等价于原 FinderRev::rfind 语义。
+/// 返回三个关键字最右命中中，起始位置最小（最左）的那个。
+/// 若无任何命中则返回 `window.len()`（表示无分割点）。
+///
+/// 关键字长度：EXECTIME = 8，ROWCOUNT = 8，EXEC_ID = 7。
+fn scan_earliest_indicator(window: &[u8]) -> usize {
+    // 分别记录三个关键字的最右命中起始位置（None 表示未命中）
+    let mut exectime_pos: Option<usize> = None;
+    let mut rowcount_pos: Option<usize> = None;
+    let mut exec_id_pos: Option<usize> = None;
+
+    let mut search_end = window.len();
+    while search_end > 0 {
+        // 所有关键字均已找到最右命中，无需继续向左
+        if exectime_pos.is_some() && rowcount_pos.is_some() && exec_id_pos.is_some() {
+            break;
+        }
+        match memrchr(b':', &window[..search_end]) {
+            None => break,
+            Some(colon) => {
+                let prefix = &window[..colon];
+                if exectime_pos.is_none() && prefix.ends_with(b"EXECTIME") {
+                    exectime_pos = Some(colon - 8);
+                } else if rowcount_pos.is_none() && prefix.ends_with(b"ROWCOUNT") {
+                    rowcount_pos = Some(colon - 8);
+                } else if exec_id_pos.is_none() && prefix.ends_with(b"EXEC_ID") {
+                    exec_id_pos = Some(colon - 7);
+                }
+                search_end = colon;
+            }
+        }
+    }
+
+    // 取三者中最左（最小索引）的命中，无命中则返回 window.len()
+    [exectime_pos, rowcount_pos, exec_id_pos]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(window.len())
+}
 
 /// Decode a sub-slice of `content_raw` bytes into a `Cow<'a, str>`.
 ///
