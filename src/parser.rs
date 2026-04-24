@@ -247,9 +247,7 @@ fn parse_record_with_hint<'a>(
 
     // 1. Timestamp
     if first_line.len() < 23 {
-        return Err(ParseError::InvalidFormat {
-            raw: String::from_utf8_lossy(first_line).to_string(),
-        });
+        return Err(make_invalid_format_error(first_line));
     }
     // We assume ASCII/UTF-8 for timestamp
     // SAFETY: We validated the timestamp format in LogIterator::next using is_ts_millis_bytes,
@@ -262,9 +260,7 @@ fn parse_record_with_hint<'a>(
     let meta_start = match memchr(b'(', &first_line[23..]) {
         Some(idx) => 23 + idx,
         None => {
-            return Err(ParseError::InvalidFormat {
-                raw: String::from_utf8_lossy(first_line).to_string(),
-            });
+            return Err(make_invalid_format_error(first_line));
         }
     };
 
@@ -277,9 +273,7 @@ fn parse_record_with_hint<'a>(
     let meta_end = match meta_end {
         Some(idx) => idx,
         None => {
-            return Err(ParseError::InvalidFormat {
-                raw: String::from_utf8_lossy(first_line).to_string(),
-            });
+            return Err(make_invalid_format_error(first_line));
         }
     };
 
@@ -399,4 +393,12 @@ fn parse_record_with_hint<'a>(
         tag,
         encoding: encoding_hint,
     })
+}
+
+/// 将原始字节转换为 InvalidFormat 错误（错误路径，标注 cold 避免影响热路径代码布局）
+#[cold]
+fn make_invalid_format_error(raw_bytes: &[u8]) -> ParseError {
+    ParseError::InvalidFormat {
+        raw: String::from_utf8_lossy(raw_bytes).to_string(),
+    }
 }
