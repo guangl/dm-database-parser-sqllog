@@ -10,7 +10,7 @@
 ## Phases
 
 - [x] **Phase 1: Measurement** - 建立可信的基准测量基础设施，确保后续优化有可验证的数据支撑 *(completed 2026-04-20)*
-- [ ] **Phase 2: Correctness** - 修复 unsafe 路径的正确性风险，为后续热路径改动建立安全地基
+- [x] **Phase 2: Correctness** - 修复 unsafe 路径的正确性风险，为后续热路径改动建立安全地基 *(completed 2026-04-20)*
 - [ ] **Phase 3: HotPath** - 零风险热路径微优化，可逐一回滚，每项改动独立可验证
 - [ ] **Phase 4: CoreAlgo** - 核心算法重写，预期最高 ROI（15–45%）的单线程吞吐提升
 - [ ] **Phase 5: Parallel** - 两阶段并行索引，解决当前字节级分块导致的负载不均问题
@@ -43,7 +43,7 @@ Plans:
   3. `find_indicators_split` 有测试用例覆盖 SQL body 内含 `EXECTIME:` 等指标关键字的场景，且结果正确
 **Plans**: 2 plans
 Plans:
-- [ ] 02-01-PLAN.md — 代码修复（CORR-01/03）：全文件编码检测 + find_indicators_split 验证守卫 + 6 条新测试
+- [x] 02-01-PLAN.md — 代码修复（CORR-01/03）：全文件编码检测 + find_indicators_split 验证守卫 + 6 条新测试
 - [x] 02-02-PLAN.md — Miri CI 基础设施（CORR-02）：miri.yml 作业 + 五个测试文件 cfg 标注
 
 ### Phase 3: HotPath
@@ -55,7 +55,10 @@ Plans:
   2. `find_indicators_split` 使用单次反向字节扫描替代 3 次独立 rfind，现有测试全部通过
   3. `parse_performance_metrics` 被 `#[inline(always)]` 标注，错误路径被 `#[cold]` 标注，编译产物可验证
   4. 顺序读取大文件（>100 MB）时，mmap advise 生效，benchmark 吞吐不退化
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 03-01-PLAN.md — HOT-01/02：find_indicators_split 早退逻辑 + 单次 memrchr 反向扫描，删除 FINDER_REV_* 静态变量
+- [ ] 03-02-PLAN.md — HOT-03/04：parse_performance_metrics inline(always) + make_invalid_format_error cold + mmap advise(Sequential)
 
 ### Phase 4: CoreAlgo
 **Goal**: 重写记录边界检测的核心扫描算法，实现预期 15–45% 的单线程吞吐提升
@@ -85,8 +88,8 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Measurement | 2/2 | Complete | 2026-04-20 |
-| 2. Correctness | 1/2 | In progress | - |
-| 3. HotPath | 0/? | Not started | - |
+| 2. Correctness | 2/2 | Complete | 2026-04-20 |
+| 3. HotPath | 0/2 | Planned | - |
 | 4. CoreAlgo | 0/? | Not started | - |
 | 5. Parallel | 0/? | Not started | - |
 
@@ -117,4 +120,5 @@ Plans:
 
 ---
 *Created: 2026-04-18*
-*Updated: 2026-04-20 — Phase 2 Plan 02 completed (CORR-02: Miri CI + cfg annotations)*
+*Updated: 2026-04-20 — Phase 2 completed (CORR-01/02/03 all done, UAT passed)*
+*Updated: 2026-04-24 — Phase 3 planned (HOT-01/02/03/04, 2 plans)*
