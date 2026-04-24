@@ -68,7 +68,9 @@ Plans:
   1. `LogIterator::next()` 使用 `memmem::Finder(b"\n20")` 单次扫描定位记录边界，不再有 `memchr(b'\n')` 逐行循环
   2. Phase 1 建立的 benchmark 显示单线程吞吐相比 Phase 3 基线提升 ≥10%（剔除语料库差异后）
   3. 时间戳检测使用打包 `u64` 掩码比较，所有现有测试通过
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 04-01-PLAN.md — CoreAlgo 算法重写（ALGO-01/02）：FINDER_RECORD_START + is_timestamp_start u64 掩码 + LogIterator::next() / find_next_record_start() 重写
 
 ### Phase 5: Parallel
 **Goal**: 通过两阶段索引扫描实现记录级均匀并行分区，并在小文件场景避免 Rayon 开销负收益
@@ -90,7 +92,7 @@ Plans:
 | 1. Measurement | 2/2 | Complete | 2026-04-20 |
 | 2. Correctness | 2/2 | Complete | 2026-04-20 |
 | 3. HotPath | 0/2 | Planned | - |
-| 4. CoreAlgo | 0/? | Not started | - |
+| 4. CoreAlgo | 0/1 | Planned | - |
 | 5. Parallel | 0/? | Not started | - |
 
 ---
@@ -122,3 +124,4 @@ Plans:
 *Created: 2026-04-18*
 *Updated: 2026-04-20 — Phase 2 completed (CORR-01/02/03 all done, UAT passed)*
 *Updated: 2026-04-24 — Phase 3 planned (HOT-01/02/03/04, 2 plans)*
+*Updated: 2026-04-24 — Phase 4 planned (ALGO-01/02, 1 plan)*
