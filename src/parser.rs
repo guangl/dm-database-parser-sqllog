@@ -1,6 +1,6 @@
 use memchr::memmem::Finder;
 use memchr::{memchr, memrchr};
-use memmap2::Mmap;
+use memmap2::{Advice, Mmap};
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
 use std::fs::File;
@@ -33,6 +33,12 @@ impl LogParser {
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ParseError> {
         let file = File::open(path).map_err(|e| ParseError::IoError(e.to_string()))?;
         let mmap = unsafe { Mmap::map(&file).map_err(|e| ParseError::IoError(e.to_string()))? };
+
+        // HOT-04: 告知 OS 以顺序模式预读 mmap 页面，减少 page fault 开销
+        // Unix-only；Windows 上 advise() 方法不存在，cfg 门控跳过
+        // 失败（如内核不支持）静默忽略，不影响正确性
+        #[cfg(unix)]
+        let _ = mmap.advise(Advice::Sequential);
 
         // Scan entire file to eliminate misclassification from early-section sampling.
         let sample = &mmap[..];
@@ -247,9 +253,7 @@ fn parse_record_with_hint<'a>(
 
     // 1. Timestamp
     if first_line.len() < 23 {
-        return Err(ParseError::InvalidFormat {
-            raw: String::from_utf8_lossy(first_line).to_string(),
-        });
+        return Err(make_invalid_format_error(first_line));
     }
     // We assume ASCII/UTF-8 for timestamp
     // SAFETY: We validated the timestamp format in LogIterator::next using is_ts_millis_bytes,
@@ -262,9 +266,7 @@ fn parse_record_with_hint<'a>(
     let meta_start = match memchr(b'(', &first_line[23..]) {
         Some(idx) => 23 + idx,
         None => {
-            return Err(ParseError::InvalidFormat {
-                raw: String::from_utf8_lossy(first_line).to_string(),
-            });
+            return Err(make_invalid_format_error(first_line));
         }
     };
 
@@ -277,9 +279,7 @@ fn parse_record_with_hint<'a>(
     let meta_end = match meta_end {
         Some(idx) => idx,
         None => {
-            return Err(ParseError::InvalidFormat {
-                raw: String::from_utf8_lossy(first_line).to_string(),
-            });
+            return Err(make_invalid_format_error(first_line));
         }
     };
 
@@ -399,4 +399,12 @@ fn parse_record_with_hint<'a>(
         tag,
         encoding: encoding_hint,
     })
+}
+
+/// 将原始字节转换为 InvalidFormat 错误（错误路径，标注 cold 避免影响热路径代码布局）
+#[cold]
+fn make_invalid_format_error(raw_bytes: &[u8]) -> ParseError {
+    ParseError::InvalidFormat {
+        raw: String::from_utf8_lossy(raw_bytes).to_string(),
+    }
 }

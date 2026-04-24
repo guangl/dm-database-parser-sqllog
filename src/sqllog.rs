@@ -96,6 +96,7 @@ impl<'a> Sqllog<'a> {
     /// # 实现说明
     /// 仅调用一次 `find_indicators_split()`，body 解码与 indicators 解析均在同一
     /// 次遍历中完成，`Cow::Borrowed` 路径全程零分配。
+    #[inline(always)]
     pub fn parse_performance_metrics(&self) -> PerformanceMetrics<'a> {
         let split = self.find_indicators_split();
         let is_borrowed = matches!(&self.content_raw, Cow::Borrowed(_));
