@@ -1,6 +1,6 @@
 use memchr::memmem::Finder;
 use memchr::{memchr, memrchr};
-use memmap2::Mmap;
+use memmap2::{Advice, Mmap};
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
 use std::fs::File;
@@ -33,6 +33,12 @@ impl LogParser {
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ParseError> {
         let file = File::open(path).map_err(|e| ParseError::IoError(e.to_string()))?;
         let mmap = unsafe { Mmap::map(&file).map_err(|e| ParseError::IoError(e.to_string()))? };
+
+        // HOT-04: 告知 OS 以顺序模式预读 mmap 页面，减少 page fault 开销
+        // Unix-only；Windows 上 advise() 方法不存在，cfg 门控跳过
+        // 失败（如内核不支持）静默忽略，不影响正确性
+        #[cfg(unix)]
+        let _ = mmap.advise(Advice::Sequential);
 
         // Scan entire file to eliminate misclassification from early-section sampling.
         let sample = &mmap[..];
