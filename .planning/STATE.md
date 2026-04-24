@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 02
+current_phase: --phase
 current_plan: 1
-status: in_progress
-last_updated: "2026-04-20T05:16:59.360Z"
+status: ready_to_plan
+last_updated: "2026-04-24T06:27:45.488Z"
 progress:
   total_phases: 5
-  completed_phases: 1
-  total_plans: 4
-  completed_plans: 3
-  percent: 75
+  completed_phases: 3
+  total_plans: 6
+  completed_plans: 5
+  percent: 60
 ---
 
 # STATE: dm-database-parser-sqllog 性能优化
@@ -30,14 +30,16 @@ progress:
 
 ## Current Position
 
-**Current Phase:** 02 (correctness)
-**Current Plan:** 2 of 2 — COMPLETED
-**Phase Status:** Phase 2 完成（CORR-02 Miri CI 标注已完成；CORR-01/03 代码修复待执行 02-01-PLAN）
+Phase: --phase (03) — EXECUTING
+Plan: 1 of --name
+**Current Phase:** 4
+**Current Plan:** Not started
+**Phase Status:** Phase 2 完成（CORR-01/02/03 全部修复，UAT 5/5 通过，代码审查 5 项修复）
 **Milestone Status:** In progress
 
 ```
 Progress: [ Phase 1 ][ Phase 2 ][ Phase 3 ][ Phase 4 ][ Phase 5 ]
-           [  DONE  ] [  02/02 ] [  ----  ] [  ----  ] [  ----  ]
+           [  DONE  ] [  DONE  ] [  ----  ] [  ----  ] [  ----  ]
 ```
 
 ---
@@ -70,6 +72,10 @@ Progress: [ Phase 1 ][ Phase 2 ][ Phase 3 ][ Phase 4 ][ Phase 5 ]
 | Phase order: Measurement first | 当前 benchmark 只测 `iter().count()`，不反映真实热路径；先修测量再优化 | Init |
 | Correctness before hot-path | unsafe 解码仅采样 64 KB，大文件有 UB 风险；必须在热路径改动前修复 | Init |
 | coarse granularity → 5 phases | 需求自然分为 5 组，依赖链清晰，coarse 粒度保留原始分组 | Init |
+| CORR-01: 全文件扫描 | simdutf8 ~50 GB/s，one-time 开销可接受；消除大文件 GB18030 误判 UB | Phase 2 |
+| CORR-03: 验证守卫 | rfind 候选点后调用 parse_indicators_from_bytes 验证；伪指标返回 len | Phase 2 |
+| CR-01 fix: Cow::Owned | parse_meta to_cow Owned 分支改为 Cow::Owned，消除 unsafe 生命周期延长 | Phase 2 |
+| WR-01 fix: loop not recurse | LogIterator::next 改为迭代循环，防止大量空行时栈溢出 | Phase 2 |
 
 ### Known Risks
 
@@ -88,8 +94,10 @@ None.
 
 ## Session Continuity
 
-**Last updated:** 2026-04-20 — Phase 02 Plan 02 completed (CORR-02: Miri CI workflow + mmap test annotations)
-**Next action:** Execute 02-01-PLAN (CORR-01 + CORR-03 code fixes)
+**Last updated:** 2026-04-20 — Phase 02 complete (all plans done, UAT 5/5 passed, code review fixes applied)
+**Next action:** Plan and execute Phase 03 (HotPath optimizations)
 
 ---
-*Updated: 2026-04-18 after roadmap creation*
+*Updated: 2026-04-20 after Phase 2 completion*
+
+**Planned Phase:** 03 (HotPath) — 2 plans — 2026-04-24T06:09:01.408Z

@@ -57,8 +57,8 @@ Plans:
   4. 顺序读取大文件（>100 MB）时，mmap advise 生效，benchmark 吞吐不退化
 **Plans**: 2 plans
 Plans:
-- [ ] 03-01-PLAN.md — HOT-01/02：find_indicators_split 早退逻辑 + 单次 memrchr 反向扫描，删除 FINDER_REV_* 静态变量
-- [ ] 03-02-PLAN.md — HOT-03/04：parse_performance_metrics inline(always) + make_invalid_format_error cold + mmap advise(Sequential)
+- [x] 03-01-PLAN.md — HOT-01/02：find_indicators_split 早退逻辑 + 单次 memrchr 反向扫描，删除 FINDER_REV_* 静态变量
+- [x] 03-02-PLAN.md — HOT-03/04：parse_performance_metrics inline(always) + make_invalid_format_error cold + mmap advise(Sequential)
 
 ### Phase 4: CoreAlgo
 **Goal**: 重写记录边界检测的核心扫描算法，实现预期 15–45% 的单线程吞吐提升
