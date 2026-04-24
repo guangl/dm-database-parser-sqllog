@@ -1,6 +1,8 @@
 use memchr::memmem::Finder;
 use memchr::{memchr, memrchr};
-use memmap2::{Advice, Mmap};
+#[cfg(unix)]
+use memmap2::Advice;
+use memmap2::Mmap;
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
 use std::fs::File;
