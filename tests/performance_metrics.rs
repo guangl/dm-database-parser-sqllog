@@ -184,3 +184,50 @@ fn hot01_dot_suffix_with_real_indicators() {
     assert_eq!(pm.exec_id, 77);
     assert_eq!(pm.sql, "SELECT 1 FROM T ");
 }
+
+// ── HOT-02 单次反向扫描测试 ────────────────────────────────────────────────────
+
+/// SQL body 内含假关键字 'EXECTIME:' + 真实指标，split 应返回真实指标起始
+#[test]
+fn hot02_fake_keyword_in_body_plus_real_indicators() {
+    // SQL body 中包含 "EXECTIME:" 字样（假关键字），真实指标在末尾
+    let raw = build_record(
+        "SELECT 'EXECTIME: fake' FROM T ",
+        "EXECTIME: 1.0(ms) ROWCOUNT: 3(rows) EXEC_ID: 55.",
+    );
+    let rec = parse_record(&raw).unwrap();
+    let pm = rec.parse_performance_metrics();
+    // 真实指标应被正确解析
+    assert!((pm.exectime - 1.0).abs() < 1e-6);
+    assert_eq!(pm.rowcount, 3);
+    assert_eq!(pm.exec_id, 55);
+    // SQL body 应包含假关键字（说明 split 点在真实指标处）
+    assert!(pm.sql.contains("EXECTIME: fake"));
+}
+
+/// SQL body 含多个 ':' 字符（如 URL），不影响 split 结果
+#[test]
+fn hot02_multiple_colons_in_body() {
+    let raw = build_record(
+        "SELECT 'http://example.com:8080/path' FROM T ",
+        "EXECTIME: 3.0(ms) ROWCOUNT: 1(rows) EXEC_ID: 99.",
+    );
+    let rec = parse_record(&raw).unwrap();
+    let pm = rec.parse_performance_metrics();
+    assert!((pm.exectime - 3.0).abs() < 1e-6);
+    assert_eq!(pm.rowcount, 1);
+    assert_eq!(pm.exec_id, 99);
+    assert!(pm.sql.contains("http://example.com:8080/path"));
+}
+
+/// 仅有 EXEC_ID 无 EXECTIME/ROWCOUNT 的记录，split 正确
+#[test]
+fn hot02_exec_id_only_split_correct() {
+    let raw = build_record("INSERT INTO T VALUES (1); ", "EXEC_ID: 123.");
+    let rec = parse_record(&raw).unwrap();
+    let pm = rec.parse_performance_metrics();
+    assert_eq!(pm.exec_id, 123);
+    assert_eq!(pm.exectime, 0.0);
+    assert_eq!(pm.rowcount, 0);
+    assert_eq!(pm.sql, "INSERT INTO T VALUES (1); ");
+}
