@@ -22,10 +22,15 @@
 
 ### Active
 
-- [ ] 优化记录边界检测热路径（`LogIterator::next`）
-- [ ] 优化指标分割（`find_indicators_split`）
-- [ ] 提升多线程分块策略
-- [ ] 减少或消除热路径中的不必要分支
+- [ ] 优化记录边界检测热路径（`LogIterator::next`）— Phase 4 目标
+- [ ] 提升多线程分块策略 — Phase 5 目标
+
+### Validated (Phase 3 — HotPath)
+
+- ✓ `find_indicators_split` O(1) 早退逻辑（HOT-01）— Validated in Phase 3: HotPath
+- ✓ 单次 `memrchr(b':')` 反向扫描替代 3 次 FinderRev（HOT-02）— Validated in Phase 3: HotPath
+- ✓ `#[inline(always)]` 热路径 + `#[cold]` 错误路径标注（HOT-03）— Validated in Phase 3: HotPath
+- ✓ mmap `Advice::Sequential` 顺序读取建议（HOT-04）— Validated in Phase 3: HotPath
 
 ### Out of Scope
 
@@ -73,4 +78,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-18 after initialization*
+*Last updated: 2026-04-24 after Phase 3 (HotPath) completion*
