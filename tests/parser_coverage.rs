@@ -1,11 +1,12 @@
-use dm_database_parser_sqllog::{parse_record, LogParser};
+use dm_database_parser_sqllog::{LogParser, parse_record};
 use std::io::Write;
 use tempfile::NamedTempFile;
 
 /// parse_record with no embedded newline → hits the None branch in is_multiline=true path
 #[test]
 fn parse_record_single_line_no_newline() {
-    let raw = b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:U trxid:3 stmt:4 appname:a) SELECT 1";
+    let raw =
+        b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:U trxid:3 stmt:4 appname:a) SELECT 1";
     let rec = parse_record(raw).unwrap();
     assert_eq!(rec.ts, "2025-11-17 16:09:41.123");
     assert!(rec.body().contains("SELECT"));

@@ -3,8 +3,8 @@ use encoding::DecoderTrap;
 use encoding::Encoding;
 use encoding::all::GB18030;
 use memchr::memchr;
-use memchr::memrchr;
 use memchr::memmem::Finder;
+use memchr::memrchr;
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
 use std::sync::LazyLock;
@@ -20,7 +20,6 @@ static FINDER_EXEC_ID: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(
 /// Typical indicators ("EXECTIME: x(ms) ROWCOUNT: y(rows) EXEC_ID: z.") are ≤ 80 bytes.
 /// 256 is a conservative upper bound that covers unusual padding or long EXEC_ID values.
 const INDICATORS_WINDOW: usize = 256;
-
 
 /// SQL 日志记录
 ///

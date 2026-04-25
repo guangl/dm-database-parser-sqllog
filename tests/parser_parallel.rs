@@ -4,9 +4,7 @@ use std::io::Write;
 use tempfile::NamedTempFile;
 
 fn make_record(ts_suffix: &str, body: &str) -> String {
-    format!(
-        "202{ts_suffix} (EP[0] sess:1 thrd:2 user:U trxid:3 stmt:4 appname:app) {body}\n"
-    )
+    format!("202{ts_suffix} (EP[0] sess:1 thrd:2 user:U trxid:3 stmt:4 appname:app) {body}\n")
 }
 
 #[test]
@@ -42,7 +40,8 @@ fn par_iter_with_multiline_records() {
             // Multiline record with embedded newlines (no \n20 in body)
             let rec = format!(
                 "2025-02-01 10:{:02}:{:02}.000 (EP[0] sess:{i} thrd:2 user:U trxid:3 stmt:4 appname:app) SELECT\n    col1,\n    col2\nFROM t\nWHERE id = {i} EXECTIME: 1(ms) ROWCOUNT: 1(rows) EXEC_ID: {i}.\n",
-                i / 60, i % 60
+                i / 60,
+                i % 60
             );
             file.write_all(rec.as_bytes()).unwrap();
         } else {
