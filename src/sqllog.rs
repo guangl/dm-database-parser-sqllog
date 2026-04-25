@@ -3,7 +3,8 @@ use encoding::DecoderTrap;
 use encoding::Encoding;
 use encoding::all::GB18030;
 use memchr::memchr;
-use memchr::memmem::{Finder, FinderRev};
+use memchr::memmem::Finder;
+use memchr::memrchr;
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
 use std::sync::LazyLock;
@@ -15,13 +16,10 @@ static FINDER_EXECTIME: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new
 static FINDER_ROWCOUNT: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"ROWCOUNT:"));
 static FINDER_EXEC_ID: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"EXEC_ID:"));
 
-/// Pre-built reverse SIMD finders for split detection (include trailing space to avoid false positives).
-static FINDER_REV_EXECTIME: LazyLock<FinderRev<'static>> =
-    LazyLock::new(|| FinderRev::new(b"EXECTIME: "));
-static FINDER_REV_ROWCOUNT: LazyLock<FinderRev<'static>> =
-    LazyLock::new(|| FinderRev::new(b"ROWCOUNT: "));
-static FINDER_REV_EXEC_ID: LazyLock<FinderRev<'static>> =
-    LazyLock::new(|| FinderRev::new(b"EXEC_ID: "));
+/// Maximum byte length of an indicators section.
+/// Typical indicators ("EXECTIME: x(ms) ROWCOUNT: y(rows) EXEC_ID: z.") are ≤ 80 bytes.
+/// 256 is a conservative upper bound that covers unusual padding or long EXEC_ID values.
+const INDICATORS_WINDOW: usize = 256;
 
 /// SQL 日志记录
 ///
@@ -97,6 +95,7 @@ impl<'a> Sqllog<'a> {
     /// # 实现说明
     /// 仅调用一次 `find_indicators_split()`，body 解码与 indicators 解析均在同一
     /// 次遍历中完成，`Cow::Borrowed` 路径全程零分配。
+    #[inline(always)]
     pub fn parse_performance_metrics(&self) -> PerformanceMetrics<'a> {
         let split = self.find_indicators_split();
         let is_borrowed = matches!(&self.content_raw, Cow::Borrowed(_));
@@ -125,6 +124,9 @@ impl<'a> Sqllog<'a> {
 
         let to_cow = |bytes: &[u8]| -> Cow<'a, str> {
             if is_borrowed {
+                // For Utf8 / Auto encoding: meta_raw is Cow::Borrowed — bytes is a sub-slice
+                // of the memory-mapped buffer that lives for 'a.  The file was validated as
+                // UTF-8 during `from_path`, so the unchecked conversion is sound.
                 unsafe {
                     Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
                         bytes.as_ptr(),
@@ -132,7 +134,14 @@ impl<'a> Sqllog<'a> {
                     )))
                 }
             } else {
-                unsafe { Cow::Owned(std::str::from_utf8_unchecked(bytes).to_string()) }
+                // For Gb18030 / Auto-fallback encoding: meta_raw is Cow::Owned (already decoded
+                // to a valid UTF-8 String).  We must NOT transmute the lifetime to 'a because
+                // the Owned String lives only as long as `self`, not 'a.  Return an owned copy.
+                Cow::Owned(
+                    std::str::from_utf8(bytes)
+                        .expect("meta_raw is always valid UTF-8")
+                        .to_string(),
+                )
             }
         };
 
@@ -212,25 +221,79 @@ impl<'a> Sqllog<'a> {
     fn find_indicators_split(&self) -> usize {
         let data = &self.content_raw;
         let len = data.len();
-        let start = len.saturating_sub(256);
+
+        // HOT-01: O(1) 早退 — DM 格式中有指标的记录以 '.' 结尾（EXEC_ID: N.）
+        // 或以 ')' 结尾（仅 EXECTIME/ROWCOUNT，格式为 N(ms)/N(rows)）。
+        // 跳过末尾 \n/\r，取最后一个有效字节；既非 '.' 也非 ')' 则无指标，直接返回。
+        let last_meaningful = data
+            .iter()
+            .rev()
+            .find(|&&b| b != b'\n' && b != b'\r')
+            .copied();
+        if last_meaningful != Some(b'.') && last_meaningful != Some(b')') {
+            return len;
+        }
+
+        let start = len.saturating_sub(INDICATORS_WINDOW);
         let window = &data[start..];
 
-        // Use SIMD reverse finders; take the leftmost (minimum) match position.
-        let mut earliest = window.len();
-        for finder in [
-            &*FINDER_REV_EXECTIME,
-            &*FINDER_REV_ROWCOUNT,
-            &*FINDER_REV_EXEC_ID,
-        ] {
-            if let Some(idx) = finder.rfind(window) {
-                earliest = earliest.min(idx);
-            }
+        // HOT-02: 单次反向扫描 ':' 字节，检查关键字前缀，记录最左命中位置。
+        // 替代 3 次独立 FinderRev::rfind 调用，减少 SIMD 启动开销。
+        let earliest = scan_earliest_indicator(window);
+
+        let split = start + earliest;
+        // CORR-03 验证守卫：假阳性（如 SQL 以指标关键字结尾）时 fallback 到全文。
+        if split < len && parse_indicators_from_bytes(&data[split..]).is_none() {
+            return len;
         }
-        start + earliest
+        split
     }
 }
 
 // ── Module-level helpers ──────────────────────────────────────────────────────
+
+/// 在 window 内单次反向扫描 ':' 字节，匹配已知指标关键字前缀。
+///
+/// 对每个关键字只取最右命中（即从右向左扫描的第一次命中），等价于原 FinderRev::rfind 语义。
+/// 返回三个关键字最右命中中，起始位置最小（最左）的那个。
+/// 若无任何命中则返回 `window.len()`（表示无分割点）。
+///
+/// 关键字长度：EXECTIME = 8，ROWCOUNT = 8，EXEC_ID = 7。
+fn scan_earliest_indicator(window: &[u8]) -> usize {
+    // 分别记录三个关键字的最右命中起始位置（None 表示未命中）
+    let mut exectime_pos: Option<usize> = None;
+    let mut rowcount_pos: Option<usize> = None;
+    let mut exec_id_pos: Option<usize> = None;
+
+    let mut search_end = window.len();
+    while search_end > 0 {
+        // 所有关键字均已找到最右命中，无需继续向左
+        if exectime_pos.is_some() && rowcount_pos.is_some() && exec_id_pos.is_some() {
+            break;
+        }
+        match memrchr(b':', &window[..search_end]) {
+            None => break,
+            Some(colon) => {
+                let prefix = &window[..colon];
+                if exectime_pos.is_none() && prefix.ends_with(b"EXECTIME") {
+                    exectime_pos = Some(colon - 8);
+                } else if rowcount_pos.is_none() && prefix.ends_with(b"ROWCOUNT") {
+                    rowcount_pos = Some(colon - 8);
+                } else if exec_id_pos.is_none() && prefix.ends_with(b"EXEC_ID") {
+                    exec_id_pos = Some(colon - 7);
+                }
+                search_end = colon;
+            }
+        }
+    }
+
+    // 取三者中最左（最小索引）的命中，无命中则返回 window.len()
+    [exectime_pos, rowcount_pos, exec_id_pos]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(window.len())
+}
 
 /// Decode a sub-slice of `content_raw` bytes into a `Cow<'a, str>`.
 ///

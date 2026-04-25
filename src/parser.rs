@@ -1,5 +1,7 @@
 use memchr::memmem::Finder;
 use memchr::{memchr, memrchr};
+#[cfg(unix)]
+use memmap2::Advice;
 use memmap2::Mmap;
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
@@ -15,6 +17,10 @@ use encoding::{DecoderTrap, Encoding};
 /// Pre-built SIMD searcher for the `") "` meta-close pattern.
 /// Avoids rebuilding the Finder on every record parse.
 static FINDER_CLOSE_META: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b") "));
+
+/// Pre-built SIMD searcher for the `"\n20"` record-start pattern.
+/// Shared across threads via LazyLock; constructed once on first use.
+static FINDER_RECORD_START: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"\n20"));
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub(crate) enum FileEncodingHint {
@@ -34,9 +40,21 @@ impl LogParser {
         let file = File::open(path).map_err(|e| ParseError::IoError(e.to_string()))?;
         let mmap = unsafe { Mmap::map(&file).map_err(|e| ParseError::IoError(e.to_string()))? };
 
-        // Sample the first 64 KB to determine encoding.
-        let sample = &mmap[..mmap.len().min(65536)];
-        let encoding = if simd_from_utf8(sample).is_ok() {
+        // HOT-04: 告知 OS 以顺序模式预读 mmap 页面，减少 page fault 开销
+        // Unix-only；Windows 上 advise() 方法不存在，cfg 门控跳过
+        // 失败（如内核不支持）静默忽略，不影响正确性
+        #[cfg(unix)]
+        let _ = mmap.advise(Advice::Sequential);
+
+        // Detect encoding by sampling the first 64 KB and the last 4 KB.
+        // Sampling both ends catches the rare case where GB18030 content only
+        // appears after the initial UTF-8 section (e.g. late-joined non-ASCII
+        // usernames), while keeping the cost well below a full-file scan.
+        let head_size = mmap.len().min(64 * 1024);
+        let tail_start = mmap.len().saturating_sub(4 * 1024).max(head_size);
+        let head_ok = simd_from_utf8(&mmap[..head_size]).is_ok();
+        let tail_ok = tail_start >= mmap.len() || simd_from_utf8(&mmap[tail_start..]).is_ok();
+        let encoding = if head_ok && tail_ok {
             FileEncodingHint::Utf8
         } else {
             FileEncodingHint::Gb18030
@@ -103,71 +121,67 @@ impl<'a> Iterator for LogIterator<'a> {
     type Item = Result<Sqllog<'a>, ParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.data.len() {
-            return None;
-        }
-
-        let data = &self.data[self.pos..];
-        let mut scan_pos = 0;
-        let mut found_next = None;
-        let mut is_multiline = false;
-
-        while let Some(idx) = memchr(b'\n', &data[scan_pos..]) {
-            let newline_idx = scan_pos + idx;
-            let next_line_start = newline_idx + 1;
-
-            if next_line_start >= data.len() {
-                break;
+        loop {
+            if self.pos >= self.data.len() {
+                return None;
             }
 
-            // Check if next line starts with timestamp
-            let check_len = std::cmp::min(23, data.len() - next_line_start);
-            if check_len == 23 {
-                let next_bytes = &data[next_line_start..next_line_start + 23];
-                // Fast check: 20xx and separators
-                if next_bytes[0] == b'2'
-                    && next_bytes[1] == b'0'
-                    && next_bytes[4] == b'-'
-                    && next_bytes[7] == b'-'
-                    && next_bytes[10] == b' '
-                    && next_bytes[13] == b':'
-                    && next_bytes[16] == b':'
-                    && next_bytes[19] == b'.'
-                {
-                    found_next = Some(newline_idx);
-                    break;
+            let data = &self.data[self.pos..];
+
+            // 快速路径：先用 memchr 找第一个 '\n'，若下一行即是时间戳则为单行记录
+            // 慢速路径（多行）：用 FINDER_RECORD_START.find_iter 跳过嵌入换行
+            let (record_end, next_start, is_multiline) = match memchr(b'\n', data) {
+                None => (data.len(), data.len(), false),
+                Some(first_nl) => {
+                    let ts_start = first_nl + 1;
+                    if ts_start + 23 <= data.len()
+                        && is_timestamp_start(&data[ts_start..ts_start + 23])
+                    {
+                        // 单行记录：边界就是第一个 '\n'
+                        (first_nl, ts_start, false)
+                    } else {
+                        // 多行记录：用 memmem 跳过嵌入换行继续搜索
+                        // ALGO-01: find_iter 替代逐行 while-memchr 循环
+                        let mut found_boundary: Option<usize> = None;
+                        for candidate in FINDER_RECORD_START.find_iter(&data[ts_start..]) {
+                            let abs_ts = ts_start + candidate + 1;
+                            if abs_ts + 23 <= data.len()
+                                && is_timestamp_start(&data[abs_ts..abs_ts + 23])
+                            {
+                                found_boundary = Some(ts_start + candidate);
+                                break;
+                            }
+                        }
+                        match found_boundary {
+                            Some(idx) => (idx, idx + 1, true),
+                            None => (data.len(), data.len(), true),
+                        }
+                    }
                 }
+            };
+
+            let record_slice = &data[..record_end];
+            self.pos += next_start;
+
+            // Trim trailing CR if present
+            let record_slice = if record_slice.ends_with(b"\r") {
+                &record_slice[..record_slice.len() - 1]
+            } else {
+                record_slice
+            };
+
+            // Skip empty slices iteratively instead of recursing to avoid stack overflow
+            // when the file contains many consecutive blank lines.
+            if record_slice.is_empty() {
+                continue;
             }
 
-            is_multiline = true;
-            scan_pos = next_line_start;
+            return Some(parse_record_with_hint(
+                record_slice,
+                is_multiline,
+                self.encoding,
+            ));
         }
-
-        let (record_end, next_start) = if let Some(idx) = found_next {
-            (idx, idx + 1)
-        } else {
-            (data.len(), data.len())
-        };
-
-        let record_slice = &data[..record_end];
-        self.pos += next_start;
-
-        // Trim trailing CR if present
-        let record_slice = if record_slice.ends_with(b"\r") {
-            &record_slice[..record_slice.len() - 1]
-        } else {
-            record_slice
-        };
-
-        if record_slice.is_empty() {
-            return self.next();
-        }
-
-        Some(parse_record_with_hint(
-            record_slice,
-            is_multiline,
-            self.encoding,
-        ))
     }
 }
 
@@ -181,29 +195,19 @@ fn find_next_record_start(data: &[u8], from: usize) -> usize {
     } else {
         return data.len();
     }
-    // Scan forward for a line starting with timestamp
-    loop {
-        if pos + 23 > data.len() {
-            return data.len();
-        }
-        let peek = &data[pos..pos + 23];
-        if peek[0] == b'2'
-            && peek[1] == b'0'
-            && peek[4] == b'-'
-            && peek[7] == b'-'
-            && peek[10] == b' '
-            && peek[13] == b':'
-            && peek[16] == b':'
-            && peek[19] == b'.'
-        {
-            return pos;
-        }
-        // Skip to next line
-        match memchr(b'\n', &data[pos..]) {
-            Some(nl) => pos += nl + 1,
-            None => return data.len(),
+    // 先检查 pos 本身是否是时间戳行（Finder 不会命中无前置 '\n' 的行首）
+    if pos + 23 <= data.len() && is_timestamp_start(&data[pos..pos + 23]) {
+        return pos;
+    }
+
+    // ALGO-01: memmem 单次扫描替代逐行 memchr loop
+    for candidate in FINDER_RECORD_START.find_iter(&data[pos..]) {
+        let ts_start = pos + candidate + 1;
+        if ts_start + 23 <= data.len() && is_timestamp_start(&data[ts_start..ts_start + 23]) {
+            return ts_start;
         }
     }
+    data.len()
 }
 
 pub fn parse_record<'a>(record_bytes: &'a [u8]) -> Result<Sqllog<'a>, ParseError> {
@@ -243,9 +247,7 @@ fn parse_record_with_hint<'a>(
 
     // 1. Timestamp
     if first_line.len() < 23 {
-        return Err(ParseError::InvalidFormat {
-            raw: String::from_utf8_lossy(first_line).to_string(),
-        });
+        return Err(make_invalid_format_error(first_line));
     }
     // We assume ASCII/UTF-8 for timestamp
     // SAFETY: We validated the timestamp format in LogIterator::next using is_ts_millis_bytes,
@@ -258,9 +260,7 @@ fn parse_record_with_hint<'a>(
     let meta_start = match memchr(b'(', &first_line[23..]) {
         Some(idx) => 23 + idx,
         None => {
-            return Err(ParseError::InvalidFormat {
-                raw: String::from_utf8_lossy(first_line).to_string(),
-            });
+            return Err(make_invalid_format_error(first_line));
         }
     };
 
@@ -273,16 +273,16 @@ fn parse_record_with_hint<'a>(
     let meta_end = match meta_end {
         Some(idx) => idx,
         None => {
-            return Err(ParseError::InvalidFormat {
-                raw: String::from_utf8_lossy(first_line).to_string(),
-            });
+            return Err(make_invalid_format_error(first_line));
         }
     };
 
     let meta_bytes = &first_line[meta_start + 1..meta_end];
-    // Lazy parsing: store raw bytes
-    // SAFETY: meta_bytes is a sub-slice of first_line, which is 'a.
-    // Use the provided encoding hint (file-level autodetection) to decide how to decode meta bytes.
+    // Lazy parsing: store raw bytes as a Cow<'a, str>.
+    // For Utf8 / Auto-UTF8 encoding: meta_bytes is a sub-slice of the memory-mapped buffer
+    // (raw UTF-8 bytes) that lives for 'a — borrowing is sound.
+    // For Gb18030 / Auto-GB18030 encoding: GB18030.decode() produces a new owned String, so
+    // meta_raw becomes Cow::Owned; the 'a lifetime is NOT extended to that allocation.
     let meta_raw = match encoding_hint {
         FileEncodingHint::Utf8 => {
             // File already validated as UTF-8 during `from_path`; skip per-slice re-validation.
@@ -393,4 +393,33 @@ fn parse_record_with_hint<'a>(
         tag,
         encoding: encoding_hint,
     })
+}
+
+// u64 掩码常量：验证时间戳格式 "20YY-MM-DD HH:MM:SS.mmm"
+// 字节位置：0('2'), 1('0'), 4('-'), 7('-'), 10(' '), 13(':'), 16(':'), 19('.')
+const LO_MASK: u64 = 0xFF0000FF0000FFFF; // data[0..8]：位置 0,1,4,7
+const LO_EXPECTED: u64 = 0x2D00002D00003032; // LE: '2'=0x32,'0'=0x30,'-'=0x2D,'-'=0x2D
+const HI_MASK: u64 = 0x0000FF0000FF0000; // data[8..16]：位置 10,13（偏移 2,5）
+const HI_EXPECTED: u64 = 0x00003A0000200000; // LE: ' '=0x20,':'=0x3A
+
+/// 检查 bytes[0..23] 是否符合时间戳格式 "20YY-MM-DD HH:MM:SS.mmm"。
+/// 调用前需确保 bytes.len() >= 23（由调用方做长度检查）。
+#[inline(always)]
+fn is_timestamp_start(bytes: &[u8]) -> bool {
+    debug_assert!(bytes.len() >= 23);
+    let lo = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
+    let hi = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+    // 位置 16(':') 和 19('.') 用两次单字节比较（比第三次 u64 load 更清晰）
+    (lo & LO_MASK == LO_EXPECTED)
+        && (hi & HI_MASK == HI_EXPECTED)
+        && bytes[16] == b':'
+        && bytes[19] == b'.'
+}
+
+/// 将原始字节转换为 InvalidFormat 错误（错误路径，标注 cold 避免影响热路径代码布局）
+#[cold]
+fn make_invalid_format_error(raw_bytes: &[u8]) -> ParseError {
+    ParseError::InvalidFormat {
+        raw: String::from_utf8_lossy(raw_bytes).to_string(),
+    }
 }

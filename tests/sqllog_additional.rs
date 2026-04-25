@@ -129,6 +129,7 @@ fn tag_extraction_and_body_trim() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn file_encoding_detection_gb18030() {
     use dm_database_parser_sqllog::LogParser;
     use encoding::all::GB18030;
@@ -156,6 +157,88 @@ fn file_encoding_detection_gb18030() {
 }
 
 #[test]
+fn find_indicators_split_exectime_keyword_in_sql_body_no_indicators() {
+    let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) SELECT * FROM t WHERE col = 'EXECTIME: slow'\n";
+    let record = parse_record(raw.as_bytes()).unwrap();
+    assert_eq!(
+        record.body(),
+        "SELECT * FROM t WHERE col = 'EXECTIME: slow'\n"
+    );
+    assert!(record.parse_indicators().is_none());
+}
+
+#[test]
+fn find_indicators_split_rowcount_keyword_in_sql_body_no_indicators() {
+    let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) SELECT * FROM t WHERE cnt = 'ROWCOUNT: many'\n";
+    let record = parse_record(raw.as_bytes()).unwrap();
+    assert_eq!(
+        record.body(),
+        "SELECT * FROM t WHERE cnt = 'ROWCOUNT: many'\n"
+    );
+    assert!(record.parse_indicators().is_none());
+}
+
+#[test]
+fn find_indicators_split_exec_id_keyword_in_sql_body_no_indicators() {
+    let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) SELECT EXEC_ID: foo FROM dual\n";
+    let record = parse_record(raw.as_bytes()).unwrap();
+    assert_eq!(record.body(), "SELECT EXEC_ID: foo FROM dual\n");
+    assert!(record.parse_indicators().is_none());
+}
+
+#[test]
+fn find_indicators_split_keyword_in_body_plus_real_indicators() {
+    // SQL body 含伪关键字，但末尾有真实指标
+    let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) SELECT EXECTIME: slow\nEXECTIME: 5.0(ms) ROWCOUNT: 1(rows) EXEC_ID: 99.\n";
+    let record = parse_record(raw.as_bytes()).unwrap();
+    // 真实指标存在，parse_indicators() 应返回 Some
+    assert!(record.parse_indicators().is_some());
+    // body 包含 SQL 主体部分
+    assert!(record.body().contains("SELECT"));
+}
+
+#[test]
+fn find_indicators_split_multiple_keywords_in_body_no_indicators() {
+    let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) EXECTIME: x ROWCOUNT: y EXEC_ID: z\n";
+    let record = parse_record(raw.as_bytes()).unwrap();
+    assert_eq!(record.body(), "EXECTIME: x ROWCOUNT: y EXEC_ID: z\n");
+    assert!(record.parse_indicators().is_none());
+}
+
+#[test]
+#[cfg(not(miri))]
+fn encoding_detection_gb18030_after_64kb_boundary() {
+    use dm_database_parser_sqllog::LogParser;
+    use encoding::all::GB18030;
+    use encoding::{EncoderTrap, Encoding};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    // 用 ASCII 记录填充超过 64 KB
+    let ascii_record = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:ascii trxid:0 stmt:0 appname:app) SELECT 1;\n";
+    let repeat_count = 65536 / ascii_record.len() + 2;
+
+    let username = "用户";
+    let user_bytes = GB18030.encode(username, EncoderTrap::Strict).unwrap();
+    let mut gb_line: Vec<u8> = b"2025-11-17 16:09:42.000 (EP[0] sess:2 thrd:2 user:".to_vec();
+    gb_line.extend_from_slice(&user_bytes);
+    gb_line.extend_from_slice(b" trxid:0 stmt:0 appname:app) SELECT 2;\n");
+
+    let mut tmp = NamedTempFile::new().unwrap();
+    for _ in 0..repeat_count {
+        tmp.write_all(ascii_record.as_bytes()).unwrap();
+    }
+    tmp.write_all(&gb_line).unwrap();
+    tmp.as_file().sync_all().unwrap();
+
+    let parser = LogParser::from_path(tmp.path()).unwrap();
+    let records: Vec<_> = parser.iter().collect();
+    let last = records.last().unwrap().as_ref().unwrap();
+    assert_eq!(last.parse_meta().username, username);
+}
+
+#[test]
+#[cfg(not(miri))]
 fn file_encoding_detection_utf8() {
     use dm_database_parser_sqllog::LogParser;
     use std::io::Write;

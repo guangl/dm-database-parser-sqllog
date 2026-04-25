@@ -3,6 +3,7 @@ use std::io::Write;
 use tempfile::NamedTempFile;
 
 #[test]
+#[cfg(not(miri))]
 fn iterator_yields_error_for_invalid_first_line_then_ok() {
     let mut file = NamedTempFile::new().unwrap();
     let bad = "this is not a record\n";
@@ -18,6 +19,7 @@ fn iterator_yields_error_for_invalid_first_line_then_ok() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn iterator_skips_empty_record_slice_between_valid_records() {
     let mut file = NamedTempFile::new().unwrap();
     let r1 = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:a) A\n";

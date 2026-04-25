@@ -3,6 +3,7 @@ use std::io::Write;
 use tempfile::NamedTempFile;
 
 #[test]
+#[cfg(not(miri))]
 fn iterator_handles_crlf_and_eof_without_newline() {
     let mut file = NamedTempFile::new().unwrap();
     let rec1 = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:app) SELECT 1\r\n";
@@ -25,6 +26,7 @@ fn iterator_handles_crlf_and_eof_without_newline() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn iterator_multiline_detection() {
     let mut file = NamedTempFile::new().unwrap();
     let content = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:app) SELECT\n  *\n  FROM dual\nEXECTIME: 0(ms) ROWCOUNT: 1(rows) EXEC_ID: 1.\n";

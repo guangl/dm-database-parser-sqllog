@@ -3,6 +3,7 @@ use std::io::Write;
 use tempfile::NamedTempFile;
 
 #[test]
+#[cfg(not(miri))]
 fn test_parser_lazy_loading() {
     let mut file = NamedTempFile::new().unwrap();
     let log_content = "2025-11-17 16:09:41.123 (sess:123 thrd:456 user:SYSDBA trxid:789 stmt:0 appname:disql ip:::127.0.0.1) SELECT * FROM DUAL; EXECTIME: 1.0(ms) ROWCOUNT: 1(rows) EXEC_ID: 100.\n";
@@ -28,6 +29,7 @@ fn test_parser_lazy_loading() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn test_parser_multiline() {
     let mut file = NamedTempFile::new().unwrap();
     let log_content = "2025-11-17 16:09:41.124 (sess:124 thrd:457 user:USER1 trxid:790 stmt:1 appname:manager ip:::192.168.1.1) SELECT *\nFROM USERS\nWHERE ID = 1;\nEXECTIME: 2.5(ms) ROWCOUNT: 5(rows) EXEC_ID: 101.\n";
