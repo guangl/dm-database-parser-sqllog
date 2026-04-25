@@ -223,7 +223,11 @@ fn find_next_record_start(data: &[u8], from: usize) -> usize {
 }
 
 pub fn parse_record<'a>(record_bytes: &'a [u8]) -> Result<Sqllog<'a>, ParseError> {
-    parse_record_with_hint(record_bytes, true, FileEncodingHint::Auto)
+    // Auto-detect multiline: inspect whether the bytes actually contain a newline
+    // rather than hardcoding true, which caused a redundant memchr scan for
+    // single-line records and was semantically misleading.
+    let is_multiline = memchr(b'\n', record_bytes).is_some();
+    parse_record_with_hint(record_bytes, is_multiline, FileEncodingHint::Auto)
 }
 
 fn parse_record_with_hint<'a>(
