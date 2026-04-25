@@ -286,27 +286,19 @@ fn parse_record_with_hint<'a>(
     let meta_raw = match encoding_hint {
         FileEncodingHint::Utf8 => {
             // File already validated as UTF-8 during `from_path`; skip per-slice re-validation.
-            // SAFETY: meta_bytes is a sub-slice of first_line which lives for 'a
-            unsafe {
-                Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                    meta_bytes.as_ptr(),
-                    meta_bytes.len(),
-                )))
-            }
+            // SAFETY: meta_bytes is a sub-slice of record_bytes which lives for 'a.
+            // No lifetime extension via from_raw_parts needed — meta_bytes already carries 'a.
+            unsafe { Cow::Borrowed(std::str::from_utf8_unchecked(meta_bytes)) }
         }
         FileEncodingHint::Gb18030 => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
             Ok(s) => Cow::Owned(s),
             Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
         },
         FileEncodingHint::Auto => match simd_from_utf8(meta_bytes) {
-            Ok(s) => {
-                // SAFETY: meta_bytes is a sub-slice of first_line which lives for 'a
-                unsafe {
-                    Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                        s.as_ptr(),
-                        s.len(),
-                    )))
-                }
+            Ok(_) => {
+                // SAFETY: meta_bytes is a sub-slice of record_bytes which lives for 'a;
+                // simd_from_utf8 confirmed it is valid UTF-8.
+                unsafe { Cow::Borrowed(std::str::from_utf8_unchecked(meta_bytes)) }
             }
             Err(_) => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
                 Ok(s) => Cow::Owned(s),
@@ -343,19 +335,15 @@ fn parse_record_with_hint<'a>(
                 tag = match encoding_hint {
                     FileEncodingHint::Utf8 => {
                         // File already validated as UTF-8; skip re-validation.
-                        // SAFETY: inner is a sub-slice of record_bytes which lives for 'a
-                        Some(unsafe {
-                            Cow::Borrowed(std::str::from_utf8_unchecked(
-                                std::slice::from_raw_parts(inner.as_ptr(), inner.len()),
-                            ))
-                        })
+                        // SAFETY: inner is a sub-slice of record_bytes which lives for 'a.
+                        // No from_raw_parts needed — inner already carries 'a lifetime.
+                        Some(unsafe { Cow::Borrowed(std::str::from_utf8_unchecked(inner)) })
                     }
                     _ => match simd_from_utf8(inner) {
-                        Ok(st) => Some(unsafe {
-                            // SAFETY: inner is a sub-slice of record_bytes which lives for 'a
-                            Cow::Borrowed(std::str::from_utf8_unchecked(
-                                std::slice::from_raw_parts(st.as_ptr(), st.len()),
-                            ))
+                        Ok(_) => Some(unsafe {
+                            // SAFETY: inner is a sub-slice of record_bytes which lives for 'a;
+                            // simd_from_utf8 confirmed it is valid UTF-8.
+                            Cow::Borrowed(std::str::from_utf8_unchecked(inner))
                         }),
                         Err(_) => match encoding_hint {
                             FileEncodingHint::Gb18030 => {
