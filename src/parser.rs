@@ -50,6 +50,14 @@ impl LogParser {
         // Sampling both ends catches the rare case where GB18030 content only
         // appears after the initial UTF-8 section (e.g. late-joined non-ASCII
         // usernames), while keeping the cost well below a full-file scan.
+        //
+        // Known limitation: the middle of large files (> ~68 KB) is not sampled.
+        // GB18030 multi-byte sequences that appear only in the middle of a very
+        // large log file may cause the file to be misclassified as UTF-8, leading
+        // to garbled output for those records. In practice DM log files either use
+        // GB18030 throughout or are entirely ASCII-safe UTF-8, so this edge case
+        // is unlikely. A full middle-window sample could be added if misclassification
+        // is observed in production.
         let head_size = mmap.len().min(64 * 1024);
         let tail_start = mmap.len().saturating_sub(4 * 1024).max(head_size);
         let head_ok = simd_from_utf8(&mmap[..head_size]).is_ok();
