@@ -104,6 +104,10 @@ impl LogParser {
             }
         }
         starts.push(data.len());
+        // dedup is load-bearing for correctness: find_next_record_start returns data.len()
+        // when no record boundary is found (e.g. file has fewer records than threads).
+        // Without dedup, duplicate data.len() entries produce zero-length chunks that
+        // LogIterator would iterate over harmlessly but wastefully. dedup collapses them.
         starts.dedup();
 
         // Pair up (start, end) boundaries, collect to Vec so we can par_iter
