@@ -18,6 +18,11 @@ use encoding::{DecoderTrap, Encoding};
 /// Avoids rebuilding the Finder on every record parse.
 static FINDER_CLOSE_META: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b") "));
 
+/// Pre-built SIMD searcher for the `"\n20"` record-start pattern.
+/// Shared across threads via LazyLock; constructed once on first use.
+static FINDER_RECORD_START: LazyLock<Finder<'static>> =
+    LazyLock::new(|| Finder::new(b"\n20"));
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub(crate) enum FileEncodingHint {
     #[default]
@@ -401,6 +406,27 @@ fn parse_record_with_hint<'a>(
         tag,
         encoding: encoding_hint,
     })
+}
+
+// u64 掩码常量：验证时间戳格式 "20YY-MM-DD HH:MM:SS.mmm"
+// 字节位置：0('2'), 1('0'), 4('-'), 7('-'), 10(' '), 13(':'), 16(':'), 19('.')
+const LO_MASK: u64 = 0xFF0000FF0000FFFF; // data[0..8]：位置 0,1,4,7
+const LO_EXPECTED: u64 = 0x2D00002D00003032; // LE: '2'=0x32,'0'=0x30,'-'=0x2D,'-'=0x2D
+const HI_MASK: u64 = 0x0000FF0000FF0000; // data[8..16]：位置 10,13（偏移 2,5）
+const HI_EXPECTED: u64 = 0x00003A0000200000; // LE: ' '=0x20,':'=0x3A
+
+/// 检查 bytes[0..23] 是否符合时间戳格式 "20YY-MM-DD HH:MM:SS.mmm"。
+/// 调用前需确保 bytes.len() >= 23（由调用方做长度检查）。
+#[inline(always)]
+fn is_timestamp_start(bytes: &[u8]) -> bool {
+    debug_assert!(bytes.len() >= 23);
+    let lo = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
+    let hi = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+    // 位置 16(':') 和 19('.') 用两次单字节比较（比第三次 u64 load 更清晰）
+    (lo & LO_MASK == LO_EXPECTED)
+        && (hi & HI_MASK == HI_EXPECTED)
+        && bytes[16] == b':'
+        && bytes[19] == b'.'
 }
 
 /// 将原始字节转换为 InvalidFormat 错误（错误路径，标注 cold 避免影响热路径代码布局）
