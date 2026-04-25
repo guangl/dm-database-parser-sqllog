@@ -122,46 +122,39 @@ impl<'a> Iterator for LogIterator<'a> {
             }
 
             let data = &self.data[self.pos..];
-            let mut scan_pos = 0;
-            let mut found_next = None;
-            let mut is_multiline = false;
 
-            while let Some(idx) = memchr(b'\n', &data[scan_pos..]) {
-                let newline_idx = scan_pos + idx;
-                let next_line_start = newline_idx + 1;
-
-                if next_line_start >= data.len() {
-                    break;
-                }
-
-                // Check if next line starts with timestamp
-                let check_len = std::cmp::min(23, data.len() - next_line_start);
-                if check_len == 23 {
-                    let next_bytes = &data[next_line_start..next_line_start + 23];
-                    // Fast check: 20xx and separators
-                    if next_bytes[0] == b'2'
-                        && next_bytes[1] == b'0'
-                        && next_bytes[4] == b'-'
-                        && next_bytes[7] == b'-'
-                        && next_bytes[10] == b' '
-                        && next_bytes[13] == b':'
-                        && next_bytes[16] == b':'
-                        && next_bytes[19] == b'.'
-                    {
-                        found_next = Some(newline_idx);
-                        break;
+            // 快速路径：先用 memchr 找第一个 '\n'，若下一行即是时间戳则为单行记录
+            // 慢速路径（多行）：用 FINDER_RECORD_START.find_iter 跳过嵌入换行
+            let (record_end, next_start, is_multiline) =
+                match memchr(b'\n', data) {
+                    None => (data.len(), data.len(), false),
+                    Some(first_nl) => {
+                        let ts_start = first_nl + 1;
+                        if ts_start + 23 <= data.len()
+                            && is_timestamp_start(&data[ts_start..ts_start + 23])
+                        {
+                            // 单行记录：边界就是第一个 '\n'
+                            (first_nl, ts_start, false)
+                        } else {
+                            // 多行记录：用 memmem 跳过嵌入换行继续搜索
+                            // ALGO-01: find_iter 替代逐行 while-memchr 循环
+                            let mut found_boundary: Option<usize> = None;
+                            for candidate in FINDER_RECORD_START.find_iter(&data[ts_start..]) {
+                                let abs_ts = ts_start + candidate + 1;
+                                if abs_ts + 23 <= data.len()
+                                    && is_timestamp_start(&data[abs_ts..abs_ts + 23])
+                                {
+                                    found_boundary = Some(ts_start + candidate);
+                                    break;
+                                }
+                            }
+                            match found_boundary {
+                                Some(idx) => (idx, idx + 1, true),
+                                None => (data.len(), data.len(), true),
+                            }
+                        }
                     }
-                }
-
-                is_multiline = true;
-                scan_pos = next_line_start;
-            }
-
-            let (record_end, next_start) = if let Some(idx) = found_next {
-                (idx, idx + 1)
-            } else {
-                (data.len(), data.len())
-            };
+                };
 
             let record_slice = &data[..record_end];
             self.pos += next_start;
@@ -198,29 +191,19 @@ fn find_next_record_start(data: &[u8], from: usize) -> usize {
     } else {
         return data.len();
     }
-    // Scan forward for a line starting with timestamp
-    loop {
-        if pos + 23 > data.len() {
-            return data.len();
-        }
-        let peek = &data[pos..pos + 23];
-        if peek[0] == b'2'
-            && peek[1] == b'0'
-            && peek[4] == b'-'
-            && peek[7] == b'-'
-            && peek[10] == b' '
-            && peek[13] == b':'
-            && peek[16] == b':'
-            && peek[19] == b'.'
-        {
-            return pos;
-        }
-        // Skip to next line
-        match memchr(b'\n', &data[pos..]) {
-            Some(nl) => pos += nl + 1,
-            None => return data.len(),
+    // 先检查 pos 本身是否是时间戳行（Finder 不会命中无前置 '\n' 的行首）
+    if pos + 23 <= data.len() && is_timestamp_start(&data[pos..pos + 23]) {
+        return pos;
+    }
+
+    // ALGO-01: memmem 单次扫描替代逐行 memchr loop
+    for candidate in FINDER_RECORD_START.find_iter(&data[pos..]) {
+        let ts_start = pos + candidate + 1;
+        if ts_start + 23 <= data.len() && is_timestamp_start(&data[ts_start..ts_start + 23]) {
+            return ts_start;
         }
     }
+    data.len()
 }
 
 pub fn parse_record<'a>(record_bytes: &'a [u8]) -> Result<Sqllog<'a>, ParseError> {
