@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# scripts/pre-push — 本地 benchmark 回归门禁
+# 安装：cp scripts/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+set -euo pipefail
+
+echo "Running benchmark regression check before push..."
+cargo bench --bench parser_benchmark
+bash scripts/check-regression.sh
