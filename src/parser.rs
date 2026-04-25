@@ -46,9 +46,15 @@ impl LogParser {
         #[cfg(unix)]
         let _ = mmap.advise(Advice::Sequential);
 
-        // Scan entire file to eliminate misclassification from early-section sampling.
-        let sample = &mmap[..];
-        let encoding = if simd_from_utf8(sample).is_ok() {
+        // Detect encoding by sampling the first 64 KB and the last 4 KB.
+        // Sampling both ends catches the rare case where GB18030 content only
+        // appears after the initial UTF-8 section (e.g. late-joined non-ASCII
+        // usernames), while keeping the cost well below a full-file scan.
+        let head_size = mmap.len().min(64 * 1024);
+        let tail_start = mmap.len().saturating_sub(4 * 1024).max(head_size);
+        let head_ok = simd_from_utf8(&mmap[..head_size]).is_ok();
+        let tail_ok = tail_start >= mmap.len() || simd_from_utf8(&mmap[tail_start..]).is_ok();
+        let encoding = if head_ok && tail_ok {
             FileEncodingHint::Utf8
         } else {
             FileEncodingHint::Gb18030
