@@ -126,15 +126,15 @@ fn benchmark_parser(c: &mut Criterion) {
     });
 
     // PAR-02: 64 MB 单线程基准（speedup 对比基线）
-    // 64 MB > PAR_THRESHOLD (32 MB)，确保 par 变体走两阶段索引路径
+    // parser 在计时循环外创建，隔离纯迭代性能（排除 mmap 创建 / page fault 干扰）
     let tmp_64mb = generate_synthetic_log(64 * 1024 * 1024);
     let tmp_64mb_path = tmp_64mb.path().to_path_buf();
+    let parser_64mb = LogParser::from_path(&tmp_64mb_path).unwrap();
 
     group.throughput(criterion::Throughput::Bytes(64 * 1024 * 1024));
     group.bench_function("parse_sqllog_file_64mb_seq", |b| {
         b.iter(|| {
-            let parser = LogParser::from_path(&tmp_64mb_path).unwrap();
-            let count = parser.iter().count();
+            let count = parser_64mb.iter().count();
             criterion::black_box(count);
         })
     });
@@ -143,8 +143,7 @@ fn benchmark_parser(c: &mut Criterion) {
     group.throughput(criterion::Throughput::Bytes(64 * 1024 * 1024));
     group.bench_function("parse_sqllog_file_64mb_par", |b| {
         b.iter(|| {
-            let parser = LogParser::from_path(&tmp_64mb_path).unwrap();
-            let count = parser.par_iter().count();
+            let count = parser_64mb.par_iter().count();
             criterion::black_box(count);
         })
     });

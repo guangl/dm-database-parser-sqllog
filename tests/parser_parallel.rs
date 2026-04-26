@@ -117,7 +117,10 @@ fn test_index_offsets_are_valid_timestamps() {
 
     // 通过 iter 解析的成功率间接验证 offsets 的合法性
     let parsed_ok = parser.iter().all(|r| r.is_ok());
-    assert!(parsed_ok, "所有 20 条记录都应能成功解析（说明 index 边界正确）");
+    assert!(
+        parsed_ok,
+        "所有 20 条记录都应能成功解析（说明 index 边界正确）"
+    );
 }
 
 #[test]
@@ -148,7 +151,10 @@ fn par_iter_yields_same_count_as_iter_large() {
     let seq_count = parser.iter().filter_map(|r| r.ok()).count();
     let par_count = parser.par_iter().filter_map(|r| r.ok()).count();
 
-    assert_eq!(seq_count, par_count, "大文件 par_iter 记录数必须与 iter 一致");
+    assert_eq!(
+        seq_count, par_count,
+        "大文件 par_iter 记录数必须与 iter 一致"
+    );
     assert!(seq_count > 0, "大文件应至少含 1 条记录");
 }
 
@@ -162,7 +168,11 @@ fn par_iter_yields_same_count_as_iter_large_multiline() {
     let mut written = 0usize;
     let mut idx = 0usize;
     while written < target {
-        let rec = if idx % 5 == 0 { multi.as_ref() } else { single.as_ref() };
+        let rec = if idx % 5 == 0 {
+            multi.as_ref()
+        } else {
+            single.as_ref()
+        };
         file.write_all(rec).unwrap();
         written += rec.len();
         idx += 1;
