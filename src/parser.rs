@@ -35,6 +35,25 @@ pub struct LogParser {
     encoding: FileEncodingHint,
 }
 
+/// 记录起始字节偏移列表，由 `LogParser::index()` 一次性构建。
+/// 每个元素是某条记录在内存映射缓冲区内的绝对字节偏移。
+/// 用于两阶段并行扫描：先建索引，再按记录数均匀分区给多线程。
+pub struct RecordIndex {
+    pub(crate) offsets: Vec<usize>,
+}
+
+impl RecordIndex {
+    /// 记录总数
+    pub fn len(&self) -> usize {
+        self.offsets.len()
+    }
+
+    /// 是否为空（文件不含任何完整记录）
+    pub fn is_empty(&self) -> bool {
+        self.offsets.is_empty()
+    }
+}
+
 impl LogParser {
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ParseError> {
         let file = File::open(path).map_err(|e| ParseError::IoError(e.to_string()))?;
@@ -77,6 +96,35 @@ impl LogParser {
             pos: 0,
             encoding: self.encoding,
         }
+    }
+
+    /// 两阶段扫描第一阶段：构建记录起始字节偏移索引。
+    /// 单线程扫描整个文件，返回的 `RecordIndex` 可直接用于并行处理阶段。
+    pub fn index(&self) -> RecordIndex {
+        let data: &[u8] = &self.mmap;
+        let mut offsets: Vec<usize> = Vec::new();
+
+        // 第 0 条记录：仅当文件首字节即是时间戳时才单独 push
+        // （find_next_record_start 会先跳过首行，所以首行就是时间戳的情况需要单独处理）
+        if data.len() >= 23 && is_timestamp_start(&data[0..23]) {
+            offsets.push(0);
+        }
+
+        let mut pos: usize = 0;
+        loop {
+            let next = find_next_record_start(data, pos);
+            if next >= data.len() {
+                break;
+            }
+            // 防止与首条记录重复 push（首字节即是时间戳的边界情况）
+            if offsets.last() != Some(&next) {
+                offsets.push(next);
+            }
+            // Pitfall 1: pos 必须前进至少 1，否则 find_next_record_start
+            // 在首行就是时间戳时会返回同一个 next，无限循环
+            pos = next.saturating_add(1);
+        }
+        RecordIndex { offsets }
     }
 
     /// Returns a Rayon parallel iterator over all log records.
