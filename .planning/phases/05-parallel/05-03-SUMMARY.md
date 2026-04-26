@@ -40,7 +40,7 @@ Machine: 10 physical cores (macOS), Rayon default thread pool.
 - 吞吐已达 ~8.4 GiB/s，接近 Apple Silicon 内存带宽的单核利用上限，水平扩展无法突破此瓶颈。
 - RESEARCH.md Assumption A2 明确记录了"如果 I/O 成为瓶颈，speedup 可能低于预期"这一风险。
 
-**记录在案的接受理由**：在 I/O 绑定场景下（小文件且全在 page cache），par_iter() 不提供有效加速；其设计价值体现在 CPU 绑定场景（如含复杂 SQL 文本处理时）。本次测量已满足 ROADMAP Phase 5 Success Criteria #2 的"提供测量手段"要求，实测比值不达标已如实记录。
+**记录在案的接受理由**：Amdahl 定律限制。par_iter() 两阶段架构中，Phase 1（index() 全文顺序扫描建立 RecordIndex）占端到端时间主导，Phase 2（并行解析）的计算量极轻（每条记录 ~206 字节，主要是 byte slice 切割）。无论开多少线程，Phase 1 无法并行化，Amdahl 定律决定并行收益接近零。8.4 GiB/s 远未达到 Apple Silicon 内存带宽上限（~200 GB/s），内存带宽不是瓶颈。本次测量已满足 ROADMAP Phase 5 Success Criteria #2 的"提供测量手段"要求，实测比值不达标已如实记录。
 
 ## Self-Check: PASSED
 
