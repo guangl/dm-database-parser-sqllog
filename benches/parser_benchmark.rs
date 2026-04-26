@@ -1,5 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use dm_database_parser_sqllog::LogParser;
+use rayon::iter::ParallelIterator;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -24,7 +25,7 @@ fn generate_synthetic_log_multiline(target_bytes: usize) -> NamedTempFile {
     let mut written = 0;
     let mut record_index: usize = 0;
     while written < target_bytes {
-        let record = if record_index % 5 == 0 {
+        let record = if record_index.is_multiple_of(5) {
             multi_line_record.as_ref()
         } else {
             single_line_record.as_ref()
@@ -116,15 +117,41 @@ fn benchmark_parser(c: &mut Criterion) {
             let count = parser
                 .iter()
                 .filter_map(|r| r.ok())
-                .map(|s| s.parse_performance_metrics())
+                .inspect(|s| {
+                    criterion::black_box(s.parse_performance_metrics());
+                })
                 .count();
             criterion::black_box(count)
+        })
+    });
+
+    // PAR-02: 64 MB 单线程基准（speedup 对比基线）
+    // parser 在计时循环外创建，隔离纯迭代性能（排除 mmap 创建 / page fault 干扰）
+    let tmp_64mb = generate_synthetic_log(64 * 1024 * 1024);
+    let tmp_64mb_path = tmp_64mb.path().to_path_buf();
+    let parser_64mb = LogParser::from_path(&tmp_64mb_path).unwrap();
+
+    group.throughput(criterion::Throughput::Bytes(64 * 1024 * 1024));
+    group.bench_function("parse_sqllog_file_64mb_seq", |b| {
+        b.iter(|| {
+            let count = parser_64mb.iter().count();
+            criterion::black_box(count);
+        })
+    });
+
+    // PAR-02: 64 MB 并行基准（目标：≥1.6x seq 在 ≥2 核机器）
+    group.throughput(criterion::Throughput::Bytes(64 * 1024 * 1024));
+    group.bench_function("parse_sqllog_file_64mb_par", |b| {
+        b.iter(|| {
+            let count = parser_64mb.par_iter().count();
+            criterion::black_box(count);
         })
     });
 
     group.finish();
     drop(tmp);
     drop(tmp_multiline);
+    drop(tmp_64mb);
 }
 
 criterion_group!(benches, benchmark_parser);

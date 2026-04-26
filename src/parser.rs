@@ -35,6 +35,25 @@ pub struct LogParser {
     encoding: FileEncodingHint,
 }
 
+/// 记录起始字节偏移列表，由 `LogParser::index()` 一次性构建。
+/// 每个元素是某条记录在内存映射缓冲区内的绝对字节偏移。
+/// 用于两阶段并行扫描：先建索引，再按记录数均匀分区给多线程。
+pub struct RecordIndex {
+    pub(crate) offsets: Vec<usize>,
+}
+
+impl RecordIndex {
+    /// 记录总数
+    pub fn len(&self) -> usize {
+        self.offsets.len()
+    }
+
+    /// 是否为空（文件不含任何完整记录）
+    pub fn is_empty(&self) -> bool {
+        self.offsets.is_empty()
+    }
+}
+
 impl LogParser {
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ParseError> {
         let file = File::open(path).map_err(|e| ParseError::IoError(e.to_string()))?;
@@ -50,6 +69,14 @@ impl LogParser {
         // Sampling both ends catches the rare case where GB18030 content only
         // appears after the initial UTF-8 section (e.g. late-joined non-ASCII
         // usernames), while keeping the cost well below a full-file scan.
+        //
+        // Known limitation: the middle of large files (> ~68 KB) is not sampled.
+        // GB18030 multi-byte sequences that appear only in the middle of a very
+        // large log file may cause the file to be misclassified as UTF-8, leading
+        // to garbled output for those records. In practice DM log files either use
+        // GB18030 throughout or are entirely ASCII-safe UTF-8, so this edge case
+        // is unlikely. A full middle-window sample could be added if misclassification
+        // is observed in production.
         let head_size = mmap.len().min(64 * 1024);
         let tail_start = mmap.len().saturating_sub(4 * 1024).max(head_size);
         let head_ok = simd_from_utf8(&mmap[..head_size]).is_ok();
@@ -71,35 +98,70 @@ impl LogParser {
         }
     }
 
+    /// 两阶段扫描第一阶段：构建记录起始字节偏移索引。
+    /// 单线程扫描整个文件，返回的 `RecordIndex` 可直接用于并行处理阶段。
+    pub fn index(&self) -> RecordIndex {
+        let data: &[u8] = &self.mmap;
+        let mut offsets: Vec<usize> = Vec::new();
+
+        // 第 0 条记录：仅当文件首字节即是时间戳时才单独 push
+        // （find_next_record_start 会先跳过首行，所以首行就是时间戳的情况需要单独处理）
+        if data.len() >= 23 && is_timestamp_start(&data[0..23]) {
+            offsets.push(0);
+        }
+
+        let mut pos: usize = 0;
+        loop {
+            let next = find_next_record_start(data, pos);
+            if next >= data.len() {
+                break;
+            }
+            // 防止与首条记录重复 push（首字节即是时间戳的边界情况）
+            if offsets.last() != Some(&next) {
+                offsets.push(next);
+            }
+            // Pitfall 1: pos 必须前进至少 1，否则 find_next_record_start
+            // 在首行就是时间戳时会返回同一个 next，无限循环
+            pos = next.saturating_add(1);
+        }
+        RecordIndex { offsets }
+    }
+
     /// Returns a Rayon parallel iterator over all log records.
     ///
-    /// Splits the file into CPU-count chunks at record boundaries and
-    /// processes each chunk on a separate thread.
+    /// Large files (≥ PAR_THRESHOLD = 32 MB) are split into N byte-aligned chunks
+    /// at record boundaries — O(threads) overhead, not O(records). Small files use a
+    /// single partition so Rayon executes single-threaded without scheduling cost
+    /// (PAR-03 semantics). `index()` is intentionally not called here: a full
+    /// sequential pre-scan would double I/O on mmap'd, I/O-bound workloads.
     pub fn par_iter(
         &self,
     ) -> impl rayon::iter::ParallelIterator<Item = Result<Sqllog<'_>, ParseError>> + '_ {
         use rayon::prelude::*;
 
+        const PAR_THRESHOLD: usize = 32 * 1024 * 1024;
+
         let data: &[u8] = &self.mmap;
         let encoding = self.encoding;
-        let num_threads = rayon::current_num_threads().max(1);
 
-        // Find chunk start positions at record boundaries
-        let mut starts: Vec<usize> = vec![0];
-        if !data.is_empty() {
+        let bounds: Vec<(usize, usize)> = if data.is_empty() {
+            Vec::new()
+        } else if data.len() < PAR_THRESHOLD {
+            vec![(0, data.len())]
+        } else {
+            let num_threads = rayon::current_num_threads().max(1);
             let chunk_size = (data.len() / num_threads).max(1);
+            let mut starts: Vec<usize> = vec![0];
             for i in 1..num_threads {
                 let boundary = find_next_record_start(data, i * chunk_size);
                 if boundary < data.len() {
                     starts.push(boundary);
                 }
             }
-        }
-        starts.push(data.len());
-        starts.dedup();
-
-        // Pair up (start, end) boundaries, collect to Vec so we can par_iter
-        let bounds: Vec<(usize, usize)> = starts.windows(2).map(|w| (w[0], w[1])).collect();
+            starts.push(data.len());
+            starts.dedup();
+            starts.windows(2).map(|w| (w[0], w[1])).collect()
+        };
 
         bounds
             .into_par_iter()
@@ -211,7 +273,11 @@ fn find_next_record_start(data: &[u8], from: usize) -> usize {
 }
 
 pub fn parse_record<'a>(record_bytes: &'a [u8]) -> Result<Sqllog<'a>, ParseError> {
-    parse_record_with_hint(record_bytes, true, FileEncodingHint::Auto)
+    // Auto-detect multiline: inspect whether the bytes actually contain a newline
+    // rather than hardcoding true, which caused a redundant memchr scan for
+    // single-line records and was semantically misleading.
+    let is_multiline = memchr(b'\n', record_bytes).is_some();
+    parse_record_with_hint(record_bytes, is_multiline, FileEncodingHint::Auto)
 }
 
 fn parse_record_with_hint<'a>(
@@ -286,27 +352,19 @@ fn parse_record_with_hint<'a>(
     let meta_raw = match encoding_hint {
         FileEncodingHint::Utf8 => {
             // File already validated as UTF-8 during `from_path`; skip per-slice re-validation.
-            // SAFETY: meta_bytes is a sub-slice of first_line which lives for 'a
-            unsafe {
-                Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                    meta_bytes.as_ptr(),
-                    meta_bytes.len(),
-                )))
-            }
+            // SAFETY: meta_bytes is a sub-slice of record_bytes which lives for 'a.
+            // No lifetime extension via from_raw_parts needed — meta_bytes already carries 'a.
+            unsafe { Cow::Borrowed(std::str::from_utf8_unchecked(meta_bytes)) }
         }
         FileEncodingHint::Gb18030 => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
             Ok(s) => Cow::Owned(s),
             Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
         },
         FileEncodingHint::Auto => match simd_from_utf8(meta_bytes) {
-            Ok(s) => {
-                // SAFETY: meta_bytes is a sub-slice of first_line which lives for 'a
-                unsafe {
-                    Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                        s.as_ptr(),
-                        s.len(),
-                    )))
-                }
+            Ok(_) => {
+                // SAFETY: meta_bytes is a sub-slice of record_bytes which lives for 'a;
+                // simd_from_utf8 confirmed it is valid UTF-8.
+                unsafe { Cow::Borrowed(std::str::from_utf8_unchecked(meta_bytes)) }
             }
             Err(_) => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
                 Ok(s) => Cow::Owned(s),
@@ -343,19 +401,15 @@ fn parse_record_with_hint<'a>(
                 tag = match encoding_hint {
                     FileEncodingHint::Utf8 => {
                         // File already validated as UTF-8; skip re-validation.
-                        // SAFETY: inner is a sub-slice of record_bytes which lives for 'a
-                        Some(unsafe {
-                            Cow::Borrowed(std::str::from_utf8_unchecked(
-                                std::slice::from_raw_parts(inner.as_ptr(), inner.len()),
-                            ))
-                        })
+                        // SAFETY: inner is a sub-slice of record_bytes which lives for 'a.
+                        // No from_raw_parts needed — inner already carries 'a lifetime.
+                        Some(unsafe { Cow::Borrowed(std::str::from_utf8_unchecked(inner)) })
                     }
                     _ => match simd_from_utf8(inner) {
-                        Ok(st) => Some(unsafe {
-                            // SAFETY: inner is a sub-slice of record_bytes which lives for 'a
-                            Cow::Borrowed(std::str::from_utf8_unchecked(
-                                std::slice::from_raw_parts(st.as_ptr(), st.len()),
-                            ))
+                        Ok(_) => Some(unsafe {
+                            // SAFETY: inner is a sub-slice of record_bytes which lives for 'a;
+                            // simd_from_utf8 confirmed it is valid UTF-8.
+                            Cow::Borrowed(std::str::from_utf8_unchecked(inner))
                         }),
                         Err(_) => match encoding_hint {
                             FileEncodingHint::Gb18030 => {
