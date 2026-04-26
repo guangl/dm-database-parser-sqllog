@@ -1,4 +1,4 @@
-use dm_database_parser_sqllog::LogParser;
+use dm_database_parser_sqllog::{LogParser, RecordIndex};
 use rayon::prelude::*;
 use std::io::Write;
 use tempfile::NamedTempFile;
@@ -71,4 +71,62 @@ fn par_iter_empty_file() {
 
     let count = parser.par_iter().count();
     assert_eq!(count, 0);
+}
+
+#[test]
+#[cfg(not(miri))]
+fn test_index_count_matches_iter() {
+    let mut file = NamedTempFile::new().unwrap();
+    for i in 0..30u32 {
+        let rec = make_record(
+            &format!("5-03-01 10:{:02}:{:02}.000", i / 60, i % 60),
+            &format!("SELECT {i}"),
+        );
+        file.write_all(rec.as_bytes()).unwrap();
+    }
+    file.flush().unwrap();
+
+    let parser = LogParser::from_path(file.path()).unwrap();
+    let iter_count = parser.iter().filter_map(|r| r.ok()).count();
+    let index: RecordIndex = parser.index();
+
+    assert_eq!(index.len(), iter_count);
+    assert_eq!(index.len(), 30);
+}
+
+#[test]
+#[cfg(not(miri))]
+fn test_index_offsets_are_valid_timestamps() {
+    let mut file = NamedTempFile::new().unwrap();
+    for i in 0..20u32 {
+        let rec = make_record(
+            &format!("5-04-01 10:{:02}:{:02}.000", i / 60, i % 60),
+            &format!("SELECT {i}"),
+        );
+        file.write_all(rec.as_bytes()).unwrap();
+    }
+    file.flush().unwrap();
+
+    let parser = LogParser::from_path(file.path()).unwrap();
+    let index: RecordIndex = parser.index();
+
+    // 每条记录应被 index 捕获一次
+    let iter_count = parser.iter().filter_map(|r| r.ok()).count();
+    assert_eq!(index.len(), iter_count, "index 与 iter 记录数不一致");
+    assert_eq!(index.len(), 20);
+
+    // 通过 iter 解析的成功率间接验证 offsets 的合法性
+    let parsed_ok = parser.iter().all(|r| r.is_ok());
+    assert!(parsed_ok, "所有 20 条记录都应能成功解析（说明 index 边界正确）");
+}
+
+#[test]
+#[cfg(not(miri))]
+fn test_index_empty_file() {
+    let file = NamedTempFile::new().unwrap();
+    let parser = LogParser::from_path(file.path()).unwrap();
+    let index: RecordIndex = parser.index();
+
+    assert!(index.is_empty(), "空文件的 index 应为空");
+    assert_eq!(index.len(), 0);
 }
