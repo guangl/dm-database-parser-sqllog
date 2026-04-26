@@ -129,61 +129,40 @@ impl LogParser {
 
     /// Returns a Rayon parallel iterator over all log records.
     ///
-    /// 大文件 (≥ PAR_THRESHOLD = 32 MB) 走两阶段：先 `index()` 构建 `RecordIndex`，
-    /// 再按记录数均匀切分给 N 个线程（消除按字节均分的负载不均）。
-    /// 小文件 (< PAR_THRESHOLD) 走单分区路径：仅 1 个 work item，Rayon 单线程执行，
-    /// 不引入分块/调度开销，满足 PAR-03 "自动退化为串行迭代" 语义。
+    /// Large files (≥ PAR_THRESHOLD = 32 MB) are split into N byte-aligned chunks
+    /// at record boundaries — O(threads) overhead, not O(records). Small files use a
+    /// single partition so Rayon executes single-threaded without scheduling cost
+    /// (PAR-03 semantics). `index()` is intentionally not called here: a full
+    /// sequential pre-scan would double I/O on mmap'd, I/O-bound workloads.
     pub fn par_iter(
         &self,
     ) -> impl rayon::iter::ParallelIterator<Item = Result<Sqllog<'_>, ParseError>> + '_ {
         use rayon::prelude::*;
 
-        /// PAR-03: 文件小于 32 MB 时回退为单分区，避免 Rayon 调度开销
         const PAR_THRESHOLD: usize = 32 * 1024 * 1024;
 
         let data: &[u8] = &self.mmap;
         let encoding = self.encoding;
 
         let bounds: Vec<(usize, usize)> = if data.is_empty() {
-            // 空文件：空 bounds，par_iter 立即返回 0 条
             Vec::new()
         } else if data.len() < PAR_THRESHOLD {
-            // PAR-03: 小文件 — 单分区，Rayon 在 bounds.len() == 1 时单线程执行
             vec![(0, data.len())]
         } else {
-            // PAR-02: 大文件 — 两阶段索引分区
-            let idx = self.index();
-            let total = idx.offsets.len();
-            if total == 0 {
-                // 文件 ≥32 MB 但无任何合法记录：单分区回退（LogIterator 会 yield 0 条）
-                vec![(0, data.len())]
-            } else {
-                let num_threads = rayon::current_num_threads().max(1);
-                let per_thread = (total / num_threads).max(1);
-
-                // 每隔 per_thread 条记录取一个分区起点
-                let mut partition_starts: Vec<usize> = (0..total)
-                    .step_by(per_thread)
-                    .map(|i| idx.offsets[i])
-                    .collect();
-                // dedup is load-bearing: 极端情况 total < num_threads 时 step_by 可能产生
-                // 重复 offset；不去重则 windows(2) 会生成 (x, x) 零长 chunk，浪费 work-item。
-                partition_starts.dedup();
-
-                // 相邻分区起点配对为 (start, end)；最后一段追加到文件末尾
-                let mut b: Vec<(usize, usize)> = partition_starts
-                    .windows(2)
-                    .map(|w| (w[0], w[1]))
-                    .collect();
-                if let Some(&last) = partition_starts.last() {
-                    b.push((last, data.len()));
+            let num_threads = rayon::current_num_threads().max(1);
+            let chunk_size = (data.len() / num_threads).max(1);
+            let mut starts: Vec<usize> = vec![0];
+            for i in 1..num_threads {
+                let boundary = find_next_record_start(data, i * chunk_size);
+                if boundary < data.len() {
+                    starts.push(boundary);
                 }
-                b
             }
+            starts.push(data.len());
+            starts.dedup();
+            starts.windows(2).map(|w| (w[0], w[1])).collect()
         };
 
-        // 核心模式不变：bounds.into_par_iter().flat_map_iter(LogIterator)
-        // bounds.len() == 1 时 Rayon 单线程执行；==0 时立即返回空迭代器。
         bounds
             .into_par_iter()
             .flat_map_iter(move |(start, end)| LogIterator {

@@ -117,7 +117,9 @@ fn benchmark_parser(c: &mut Criterion) {
             let count = parser
                 .iter()
                 .filter_map(|r| r.ok())
-                .inspect(|s| { criterion::black_box(s.parse_performance_metrics()); })
+                .inspect(|s| {
+                    criterion::black_box(s.parse_performance_metrics());
+                })
                 .count();
             criterion::black_box(count)
         })
