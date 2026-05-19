@@ -95,6 +95,7 @@ impl LogParser {
             data: &self.mmap,
             pos: 0,
             encoding: self.encoding,
+            line_number: 1,
         }
     }
 
@@ -169,6 +170,7 @@ impl LogParser {
                 data: &data[start..end],
                 pos: 0,
                 encoding,
+                line_number: 0,
             })
     }
 }
@@ -177,6 +179,10 @@ pub struct LogIterator<'a> {
     data: &'a [u8],
     pos: usize,
     encoding: FileEncodingHint,
+    /// 当前文件的绝对行号。迭代器追踪遇到的每一个 '\n' 字节并累加。
+    /// 从 1 开始计数（文件首行为第 1 行）。
+    /// 注意：par_iter() 分区的 LogIterator 中此值为 0（分区扫描无法维护全局行号）。
+    line_number: u64,
 }
 
 impl<'a> Iterator for LogIterator<'a> {
@@ -189,6 +195,7 @@ impl<'a> Iterator for LogIterator<'a> {
             }
 
             let data = &self.data[self.pos..];
+            let current_line = self.line_number;
 
             // 快速路径：先用 memchr 找第一个 '\n'，若下一行即是时间戳则为单行记录
             // 慢速路径（多行）：用 FINDER_RECORD_START.find_iter 跳过嵌入换行
@@ -225,6 +232,10 @@ impl<'a> Iterator for LogIterator<'a> {
             let record_slice = &data[..record_end];
             self.pos += next_start;
 
+            // 更新行号：统计本次迭代消耗的字节中所有 '\n' 的数量
+            // 必须在空记录 continue 之前执行，这样空记录跳过时 line_number 也被正确更新
+            self.line_number += data[..next_start].iter().filter(|&&b| b == b'\n').count() as u64;
+
             // Trim trailing CR if present
             let record_slice = if record_slice.ends_with(b"\r") {
                 &record_slice[..record_slice.len() - 1]
@@ -242,6 +253,7 @@ impl<'a> Iterator for LogIterator<'a> {
                 record_slice,
                 is_multiline,
                 self.encoding,
+                current_line,
             ));
         }
     }
