@@ -9,6 +9,7 @@ use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
 use std::sync::LazyLock;
 
+use crate::error::ParseError;
 use crate::parser::FileEncodingHint;
 
 /// Pre-built SIMD finders for performance indicators — avoids per-call initialization.
@@ -113,6 +114,39 @@ impl<'a> Sqllog<'a> {
         let mut pm = parse_indicators_from_bytes(&self.content_raw[split..]).unwrap_or_default();
         pm.sql = sql;
         pm
+    }
+
+    /// 获取 EXECTIME 字段的值（毫秒）。
+    ///
+    /// 返回 `Result<Option<u64>, ParseError>`：
+    /// - `Ok(Some(v))` — EXECTIME 存在且解析成功
+    /// - `Ok(None)` — 记录不含 EXECTIME 字段
+    /// - `Err(e)` — 解析失败（当前实现中不会触发，为 API 契约保留）
+    ///
+    /// 内部复用 `parse_indicators()` 逻辑。
+    /// 如需精确的 f32 值，请使用 `parse_performance_metrics()`。
+    pub fn exec_time(&self) -> Result<Option<u64>, ParseError> {
+        Ok(match self.parse_indicators() {
+            None => None,
+            Some(m) if m.exectime > 0.0 => Some(m.exectime as u64),
+            Some(_) => None,
+        })
+    }
+
+    /// 获取 ROWCOUNT 字段的值（行数）。
+    ///
+    /// 返回 `Result<Option<u64>, ParseError>`：
+    /// - `Ok(Some(v))` — ROWCOUNT 存在且解析成功
+    /// - `Ok(None)` — 记录不含 ROWCOUNT 字段
+    /// - `Err(e)` — 解析失败（当前实现中不会触发）
+    ///
+    /// 内部复用 `parse_indicators()` 逻辑。
+    pub fn row_count(&self) -> Result<Option<u64>, ParseError> {
+        Ok(match self.parse_indicators() {
+            None => None,
+            Some(m) if m.rowcount > 0 => Some(m.rowcount as u64),
+            Some(_) => None,
+        })
     }
 
     /// 解析元数据
