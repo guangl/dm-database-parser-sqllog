@@ -120,16 +120,29 @@ fn test_parse_error_impl_std_error() {
     assert_error::<ParseError>();
 }
 
-/// 验证 Display 格式中包含行号信息。
+/// 验证所有 ParseError 变体的 Display 格式正确。
 #[test]
 fn test_error_display_contains_line_number() {
+    // InvalidFormat — 应包含行号
     let err = ParseError::InvalidFormat {
         raw: "test".to_string(),
         line_number: 42,
     };
     let msg = err.to_string();
-    assert!(msg.contains("42"), "Display should contain line number 42, got: {msg}");
-    assert!(msg.contains("line"), "Display should contain 'line', got: {msg}");
+    assert!(msg.contains("42"), "InvalidFormat display should contain line number 42, got: {msg}");
+    assert!(msg.contains("line"), "InvalidFormat display should contain 'line', got: {msg}");
+
+    // FileNotFound — 不包含行号，但应包含路径
+    let err = ParseError::FileNotFound {
+        path: "missing.log".to_string(),
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("missing.log"), "FileNotFound display should contain path, got: {msg}");
+
+    // IoError — 应包含错误描述
+    let err = ParseError::IoError("permission denied".to_string());
+    let msg = err.to_string();
+    assert!(msg.contains("permission denied"), "IoError display should contain message, got: {msg}");
 }
 
 /// 验证多行记录之后的行号计数是否正确。
