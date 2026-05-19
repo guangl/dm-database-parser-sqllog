@@ -523,3 +523,51 @@ fn make_invalid_format_error(raw_bytes: &[u8], line_number: u64) -> ParseError {
         line_number,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_timestamp_start_valid() {
+        let ts = b"2025-11-17 16:09:41.123";
+        assert!(is_timestamp_start(ts));
+    }
+
+    #[test]
+    fn test_is_timestamp_start_wrong_year_prefix() {
+        let ts = b"1025-11-17 16:09:41.123";
+        assert!(!is_timestamp_start(ts));
+    }
+
+    #[test]
+    fn test_is_timestamp_start_wrong_month_separator() {
+        let ts = b"2025X11-17 16:09:41.123";
+        assert!(!is_timestamp_start(ts));
+    }
+
+    #[test]
+    fn test_is_timestamp_start_wrong_second_separator() {
+        let ts = b"2025-11-17 16:09X41.123";
+        assert!(!is_timestamp_start(ts));
+    }
+
+    #[test]
+    fn test_is_timestamp_start_wrong_millis_separator() {
+        let ts = b"2025-11-17 16:09:41X123";
+        assert!(!is_timestamp_start(ts));
+    }
+
+    #[test]
+    fn test_is_timestamp_start_exactly_23_bytes() {
+        let ts = b"2025-11-17 16:09:41.123";
+        assert_eq!(ts.len(), 23);
+        assert!(is_timestamp_start(ts));
+    }
+
+    #[test]
+    fn test_is_timestamp_start_trailing_garbage() {
+        let ts = b"2025-11-17 16:09:41.123extra_garbage_here";
+        assert!(is_timestamp_start(ts));
+    }
+}

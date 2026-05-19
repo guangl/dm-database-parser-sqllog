@@ -131,3 +131,62 @@ fn test_error_display_contains_line_number() {
     assert!(msg.contains("42"), "Display should contain line number 42, got: {msg}");
     assert!(msg.contains("line"), "Display should contain 'line', got: {msg}");
 }
+
+/// 验证多行记录之后的行号计数是否正确。
+#[test]
+#[cfg(not(miri))]
+fn test_line_number_with_multiline_record() {
+    let mut file = NamedTempFile::new().unwrap();
+    // Multiline record spanning 3 lines, followed by invalid record
+    let content = concat!(
+        "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:a) SELECT\n",
+        "  col1\n",
+        "  FROM t\n",
+        "2025-11-17 16:09:41.124 BAD WITHOUT META\n",
+    );
+    file.write_all(content.as_bytes()).unwrap();
+
+    let parser = LogParser::from_path(file.path()).unwrap();
+    let mut it = parser.iter();
+
+    let r1 = it.next().unwrap();
+    assert!(r1.is_ok(), "first record should parse OK");
+
+    let err = it.next().unwrap().unwrap_err();
+    match err {
+        ParseError::InvalidFormat { line_number, .. } => {
+            // Multiline record spans lines 1-3; bad record starts at line 4.
+            assert_eq!(line_number, 4, "expected line_number 4, got {line_number}");
+        }
+        _ => panic!("Expected InvalidFormat, got {err:?}"),
+    }
+}
+
+/// 通过公共 parse_record API 间接验证 is_timestamp_start 的行为。
+#[test]
+fn test_parse_record_timestamp_validation() {
+    use dm_database_parser_sqllog::parse_record;
+
+    // Valid record with correct timestamp — should parse OK.
+    let valid = b"2025-11-17 16:09:41.123 (EP[0]) SELECT";
+    let result = parse_record(valid);
+    assert!(result.is_ok(), "valid record should parse OK");
+
+    // Record where first 23 bytes look like a timestamp but meta is missing —
+    // timestamp validation passes, but parsing fails on meta extraction.
+    let bad_ts_no_meta = b"2025-11-17 16:09:41.123 INVALID NO META";
+    let result = parse_record(bad_ts_no_meta);
+    assert!(matches!(result, Err(ParseError::InvalidFormat { .. })));
+
+    // Record shorter than 23 bytes — caught by length check before timestamp parsing.
+    let short = b"2025-11-17 16:0";
+    let result = parse_record(short);
+    assert!(matches!(result, Err(ParseError::InvalidFormat { .. })));
+
+    // Record with ASCII byte at position 2 that breaks "20" prefix —
+    // is_timestamp_start says false (not a timestamp), but parse_record
+    // still reads it as a record and fails on meta.
+    let wrong_ts = b"1025-11-17 16:09:41.123 (EP[0]) X";
+    let result = parse_record(wrong_ts);
+    assert!(result.is_ok(), "record with non-standard prefix should still parse if meta is present");
+}
