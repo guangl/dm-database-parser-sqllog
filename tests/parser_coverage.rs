@@ -1,4 +1,4 @@
-use dm_database_parser_sqllog::{LogParser, parse_record};
+use dm_database_parser_sqllog::{LogParserBuilder, parse_record};
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -37,7 +37,7 @@ fn iterator_skips_leading_blank_line() {
     let content = "\n2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:U trxid:3 stmt:4 appname:a) SELECT 1\n";
     file.write_all(content.as_bytes()).unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let records: Vec<_> = parser.iter().filter_map(|r| r.ok()).collect();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].ts, "2025-11-17 16:09:41.123");
@@ -57,7 +57,7 @@ fn crlf_in_multiline_first_line() {
     );
     file.write_all(content.as_bytes()).unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let records: Vec<_> = parser.iter().filter_map(|r| r.ok()).collect();
     assert_eq!(records.len(), 2);
     assert_eq!(records[0].ts, "2025-11-17 16:09:41.123");

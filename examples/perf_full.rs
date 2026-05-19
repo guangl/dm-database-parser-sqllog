@@ -1,7 +1,7 @@
 /// Benchmark comparing iter() vs par_iter() on a synthetic 50MB log file.
 ///
 /// Usage: cargo run --example perf_full --release
-use dm_database_parser_sqllog::LogParser;
+use dm_database_parser_sqllog::LogParserBuilder;
 use rayon::prelude::*;
 use std::time::{Duration, Instant};
 
@@ -22,7 +22,7 @@ fn generate_log_data(target_bytes: usize) -> Vec<u8> {
 fn bench_iter(path: &str) -> Vec<Duration> {
     let mut durations = Vec::with_capacity(BENCH_ITERS);
     for _ in 0..BENCH_ITERS {
-        let parser = LogParser::from_path(path).expect("open file");
+        let parser = LogParserBuilder::new(path).build().expect("open file");
         let start = Instant::now();
         let count: usize = parser.iter().filter(|r| r.is_ok()).count();
         let elapsed = start.elapsed();
@@ -36,7 +36,7 @@ fn bench_iter(path: &str) -> Vec<Duration> {
 fn bench_par_iter(path: &str) -> Vec<Duration> {
     let mut durations = Vec::with_capacity(BENCH_ITERS);
     for _ in 0..BENCH_ITERS {
-        let parser = LogParser::from_path(path).expect("open file");
+        let parser = LogParserBuilder::new(path).build().expect("open file");
         let start = Instant::now();
         let count: usize = parser.par_iter().filter(|r| r.is_ok()).count();
         let elapsed = start.elapsed();
@@ -91,11 +91,11 @@ fn main() {
 
     println!("\nWarm-up ({WARMUP_ITERS} iterations each)…");
     for _ in 0..WARMUP_ITERS {
-        let parser = LogParser::from_path(&tmp).expect("open");
+        let parser = LogParserBuilder::new(&tmp).build().expect("open");
         std::hint::black_box(parser.iter().count());
     }
     for _ in 0..WARMUP_ITERS {
-        let parser = LogParser::from_path(&tmp).expect("open");
+        let parser = LogParserBuilder::new(&tmp).build().expect("open");
         std::hint::black_box(parser.par_iter().count());
     }
 

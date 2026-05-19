@@ -1,4 +1,4 @@
-use dm_database_parser_sqllog::{LogParser, ParseError};
+use dm_database_parser_sqllog::{LogParserBuilder, ParseError};
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -10,7 +10,7 @@ fn iterator_yields_error_for_invalid_first_line_then_ok() {
     let good = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:a) X\n";
     write!(file, "{}{}", bad, good).unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let mut it = parser.iter();
     let r1 = it.next().unwrap();
     assert!(r1.is_err());
@@ -26,7 +26,7 @@ fn iterator_skips_empty_record_slice_between_valid_records() {
     let r2 = "2025-11-17 16:09:41.124 (EP[0] sess:2 thrd:3 user:u trxid:4 stmt:5 appname:b) B\n";
     write!(file, "{}\n{}", r1, r2).unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let v: Vec<_> = parser.iter().collect();
     // Should parse exactly two records
     assert_eq!(v.len(), 2);
@@ -44,7 +44,7 @@ fn test_skip_errors_filters_invalid_records() {
     let valid_b = "2025-11-17 16:09:41.124 (EP[0] sess:2 thrd:3 user:u trxid:4 stmt:5 appname:b) VALID_B\n";
     write!(file, "{}{}{}", valid_a, invalid, valid_b).unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let v: Vec<_> = parser.iter().skip_errors().collect();
 
     assert_eq!(v.len(), 2);
@@ -65,7 +65,7 @@ fn test_error_contains_correct_line_number() {
     let trailing_good = "2025-11-17 16:09:41.125 (EP[0] sess:2 thrd:3 user:u trxid:4 stmt:5 appname:b) OK2\n";
     write!(file, "{}{}{}", good, bad, trailing_good).unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let mut it = parser.iter();
 
     // 第 1 条有效
@@ -95,7 +95,7 @@ fn test_line_number_after_multiple_valid_records() {
     let trailing_good = "2025-11-17 16:09:41.125 (EP[0] sess:4 thrd:5 user:u trxid:6 stmt:7 appname:d) D\n";
     write!(file, "{}{}{}{}{}", r1, r2, r3, bad, trailing_good).unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let mut it = parser.iter();
 
     // 前 3 条有效
@@ -159,7 +159,7 @@ fn test_line_number_with_multiline_record() {
     );
     file.write_all(content.as_bytes()).unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let mut it = parser.iter();
 
     let r1 = it.next().unwrap();

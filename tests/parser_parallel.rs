@@ -1,4 +1,4 @@
-use dm_database_parser_sqllog::{LogParser, RecordIndex};
+use dm_database_parser_sqllog::{LogParserBuilder, RecordIndex};
 use rayon::prelude::*;
 use std::io::Write;
 use tempfile::NamedTempFile;
@@ -21,7 +21,7 @@ fn par_iter_yields_same_count_as_iter() {
     }
     file.flush().unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
 
     let sequential_count = parser.iter().filter_map(|r| r.ok()).count();
     let parallel_count = parser.par_iter().filter_map(|r| r.ok()).count();
@@ -54,7 +54,7 @@ fn par_iter_with_multiline_records() {
     }
     file.flush().unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
 
     let sequential_count = parser.iter().filter_map(|r| r.ok()).count();
     let parallel_count = parser.par_iter().filter_map(|r| r.ok()).count();
@@ -67,7 +67,7 @@ fn par_iter_with_multiline_records() {
 #[cfg(not(miri))]
 fn par_iter_empty_file() {
     let file = NamedTempFile::new().unwrap();
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
 
     let count = parser.par_iter().count();
     assert_eq!(count, 0);
@@ -86,7 +86,7 @@ fn test_index_count_matches_iter() {
     }
     file.flush().unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let iter_count = parser.iter().filter_map(|r| r.ok()).count();
     let index: RecordIndex = parser.index();
 
@@ -107,7 +107,7 @@ fn test_index_offsets_are_valid_timestamps() {
     }
     file.flush().unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let index: RecordIndex = parser.index();
 
     // 每条记录应被 index 捕获一次
@@ -127,7 +127,7 @@ fn test_index_offsets_are_valid_timestamps() {
 #[cfg(not(miri))]
 fn test_index_empty_file() {
     let file = NamedTempFile::new().unwrap();
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let index: RecordIndex = parser.index();
 
     assert!(index.is_empty(), "空文件的 index 应为空");
@@ -147,7 +147,7 @@ fn par_iter_yields_same_count_as_iter_large() {
     }
     file.flush().unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let seq_count = parser.iter().filter_map(|r| r.ok()).count();
     let par_count = parser.par_iter().filter_map(|r| r.ok()).count();
 
@@ -168,7 +168,7 @@ fn par_iter_yields_same_count_as_iter_large_multiline() {
     let mut written = 0usize;
     let mut idx = 0usize;
     while written < target {
-        let rec = if idx % 5 == 0 {
+        let rec = if idx.is_multiple_of(5) {
             multi.as_ref()
         } else {
             single.as_ref()
@@ -179,7 +179,7 @@ fn par_iter_yields_same_count_as_iter_large_multiline() {
     }
     file.flush().unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let seq_count = parser.iter().filter_map(|r| r.ok()).count();
     let par_count = parser.par_iter().filter_map(|r| r.ok()).count();
 
@@ -202,7 +202,7 @@ fn par_iter_small_file_single_partition() {
     }
     file.flush().unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let seq_count = parser.iter().filter_map(|r| r.ok()).count();
     let par_count = parser.par_iter().filter_map(|r| r.ok()).count();
 

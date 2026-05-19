@@ -1,5 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use dm_database_parser_sqllog::LogParser;
+use dm_database_parser_sqllog::LogParserBuilder;
 use rayon::iter::ParallelIterator;
 use std::io::Write;
 use std::path::PathBuf;
@@ -50,7 +50,7 @@ fn benchmark_parser(c: &mut Criterion) {
     if real_path.exists() {
         group.bench_function("parse_sqllog_file_full", |b| {
             b.iter(|| {
-                let parser = LogParser::from_path(&real_path).unwrap();
+                let parser = LogParserBuilder::new(&real_path).build().unwrap();
                 let count = parser.iter().count();
                 criterion::black_box(count);
             })
@@ -65,7 +65,7 @@ fn benchmark_parser(c: &mut Criterion) {
     group.throughput(criterion::Throughput::Bytes(5 * 1024 * 1024));
     group.bench_function("parse_sqllog_file_5mb", |b| {
         b.iter(|| {
-            let parser = LogParser::from_path(&tmp_path).unwrap();
+            let parser = LogParserBuilder::new(&tmp_path).build().unwrap();
             let count = parser.iter().count();
             criterion::black_box(count);
         })
@@ -73,13 +73,13 @@ fn benchmark_parser(c: &mut Criterion) {
 
     // MEAS-01: records/sec 变体（与 parse_sqllog_file_5mb 测相同代码）
     let record_count_single = {
-        let parser = LogParser::from_path(&tmp_path).unwrap();
+        let parser = LogParserBuilder::new(&tmp_path).build().unwrap();
         parser.iter().filter_map(|r| r.ok()).count() as u64
     };
     group.throughput(criterion::Throughput::Elements(record_count_single));
     group.bench_function("parse_sqllog_file_5mb_rps", |b| {
         b.iter(|| {
-            let parser = LogParser::from_path(&tmp_path).unwrap();
+            let parser = LogParserBuilder::new(&tmp_path).build().unwrap();
             criterion::black_box(parser.iter().count())
         })
     });
@@ -91,20 +91,20 @@ fn benchmark_parser(c: &mut Criterion) {
     group.throughput(criterion::Throughput::Bytes(5 * 1024 * 1024));
     group.bench_function("parse_sqllog_multiline_5mb", |b| {
         b.iter(|| {
-            let parser = LogParser::from_path(&tmp_multiline_path).unwrap();
+            let parser = LogParserBuilder::new(&tmp_multiline_path).build().unwrap();
             criterion::black_box(parser.iter().count())
         })
     });
 
     // MEAS-01: 多行 records/sec 变体
     let record_count_multi = {
-        let parser = LogParser::from_path(&tmp_multiline_path).unwrap();
+        let parser = LogParserBuilder::new(&tmp_multiline_path).build().unwrap();
         parser.iter().filter_map(|r| r.ok()).count() as u64
     };
     group.throughput(criterion::Throughput::Elements(record_count_multi));
     group.bench_function("parse_sqllog_multiline_5mb_rps", |b| {
         b.iter(|| {
-            let parser = LogParser::from_path(&tmp_multiline_path).unwrap();
+            let parser = LogParserBuilder::new(&tmp_multiline_path).build().unwrap();
             criterion::black_box(parser.iter().count())
         })
     });
@@ -113,7 +113,7 @@ fn benchmark_parser(c: &mut Criterion) {
     group.throughput(criterion::Throughput::Bytes(5 * 1024 * 1024));
     group.bench_function("parse_sqllog_metrics_5mb", |b| {
         b.iter(|| {
-            let parser = LogParser::from_path(&tmp_multiline_path).unwrap();
+            let parser = LogParserBuilder::new(&tmp_multiline_path).build().unwrap();
             let count = parser
                 .iter()
                 .filter_map(|r| r.ok())
@@ -129,7 +129,7 @@ fn benchmark_parser(c: &mut Criterion) {
     // parser 在计时循环外创建，隔离纯迭代性能（排除 mmap 创建 / page fault 干扰）
     let tmp_64mb = generate_synthetic_log(64 * 1024 * 1024);
     let tmp_64mb_path = tmp_64mb.path().to_path_buf();
-    let parser_64mb = LogParser::from_path(&tmp_64mb_path).unwrap();
+    let parser_64mb = LogParserBuilder::new(&tmp_64mb_path).build().unwrap();
 
     group.throughput(criterion::Throughput::Bytes(64 * 1024 * 1024));
     group.bench_function("parse_sqllog_file_64mb_seq", |b| {

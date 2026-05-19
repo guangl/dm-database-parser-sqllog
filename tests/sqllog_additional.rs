@@ -1,4 +1,4 @@
-use dm_database_parser_sqllog::parse_record;
+use dm_database_parser_sqllog::{LogParserBuilder, parse_record};
 
 fn build_record(line1_body: &str, tail: &str) -> Vec<u8> {
     let header = b"2025-11-17 16:09:41.123 (EP[1] sess:123 thrd:456 user:alice trxid:789 stmt:0x1 appname:bench) ";
@@ -131,7 +131,6 @@ fn tag_extraction_and_body_trim() {
 #[test]
 #[cfg(not(miri))]
 fn file_encoding_detection_gb18030() {
-    use dm_database_parser_sqllog::LogParser;
     use encoding::all::GB18030;
     use encoding::{EncoderTrap, Encoding};
     use std::io::Write;
@@ -150,7 +149,7 @@ fn file_encoding_detection_gb18030() {
     tmp.write_all(&line).expect("write");
     tmp.as_file().sync_all().expect("sync");
 
-    let parser = LogParser::from_path(tmp.path()).expect("open");
+    let parser = LogParserBuilder::new(tmp.path()).build().expect("open");
     let rec = parser.iter().next().unwrap().unwrap();
     let meta = rec.parse_meta();
     assert_eq!(meta.username, username);
@@ -208,7 +207,6 @@ fn find_indicators_split_multiple_keywords_in_body_no_indicators() {
 #[test]
 #[cfg(not(miri))]
 fn encoding_detection_gb18030_after_64kb_boundary() {
-    use dm_database_parser_sqllog::LogParser;
     use encoding::all::GB18030;
     use encoding::{EncoderTrap, Encoding};
     use std::io::Write;
@@ -231,7 +229,7 @@ fn encoding_detection_gb18030_after_64kb_boundary() {
     tmp.write_all(&gb_line).unwrap();
     tmp.as_file().sync_all().unwrap();
 
-    let parser = LogParser::from_path(tmp.path()).unwrap();
+    let parser = LogParserBuilder::new(tmp.path()).build().unwrap();
     let records: Vec<_> = parser.iter().collect();
     let last = records.last().unwrap().as_ref().unwrap();
     assert_eq!(last.parse_meta().username, username);
@@ -240,7 +238,6 @@ fn encoding_detection_gb18030_after_64kb_boundary() {
 #[test]
 #[cfg(not(miri))]
 fn file_encoding_detection_utf8() {
-    use dm_database_parser_sqllog::LogParser;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -248,14 +245,14 @@ fn file_encoding_detection_utf8() {
     let user_bytes = username.as_bytes();
 
     let mut line: Vec<u8> = b"2025-11-17 16:09:41.123 (EP[2] sess:0xABC thrd:777 user:".to_vec();
-    line.extend_from_slice(&user_bytes);
+    line.extend_from_slice(user_bytes);
     line.extend_from_slice(b" trxid:0 stmt:0x2 appname:cli) SELECT\n");
 
     let mut tmp = NamedTempFile::new().expect("tmp");
     tmp.write_all(&line).expect("write");
     tmp.as_file().sync_all().expect("sync");
 
-    let parser = LogParser::from_path(tmp.path()).expect("open");
+    let parser = LogParserBuilder::new(tmp.path()).build().expect("open");
     let rec = parser.iter().next().unwrap().unwrap();
     let meta = rec.parse_meta();
     assert_eq!(meta.username, username);
