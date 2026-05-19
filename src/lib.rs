@@ -11,7 +11,11 @@
 //!
 //! ## 快速开始
 //!
-//! ### 从文件迭代处理 Sqllogs（推荐）
+//! 以下示例展示了最常见的三种使用场景。所有示例假设日志文件为 `sqllog.txt`。
+//!
+//! ### 示例 1：基础迭代
+//!
+//! 使用 `LogParserBuilder` 构建解析器，遍历所有 SQL 记录并打印时间戳和 SQL 语句体。
 //!
 //! ```rust,no_run
 //! use dm_database_parser_sqllog::LogParserBuilder;
@@ -19,34 +23,46 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let parser = LogParserBuilder::new("sqllog.txt").build()?;
 //! for result in parser.iter() {
-//!     match result {
-//!         Ok(sqllog) => {
-//!             println!("时间戳: {}", sqllog.ts);
-//!             println!("用户: {}", sqllog.parse_meta().username);
-//!             println!("SQL: {}", sqllog.body());
-//!         }
-//!         Err(e) => eprintln!("解析错误: {}", e),
-//!     }
+//!     let record = result?;
+//!     println!("时间戳: {}", record.ts);
+//!     println!("SQL: {}", record.body());
 //! }
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! ### 从文件批量加载并解析为 Sqllog（自动并行处理）
+//! ### 示例 2：过滤慢查询
+//!
+//! 使用 `filter_by_exec_time(100)` 过滤出执行时间 >= 100ms 的慢查询，
+//! 然后通过 `exec_time()` 获取具体耗时和 `body()` 获取 SQL 内容。
 //!
 //! ```rust,no_run
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! // 若需要一次性加载所有记录到内存，可从迭代器收集：
-//! let parser = dm_database_parser_sqllog::LogParserBuilder::new("sqllog.txt").build()?;
-//! let results: Vec<_> = parser.iter().collect();
-//! let sqllogs: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok().cloned()).collect();
-//! let errors: Vec<_> = results.iter().filter_map(|r| r.as_ref().err().cloned()).collect();
-//! println!("成功解析 {} 条 SQL 日志", sqllogs.len());
-//! println!("遇到 {} 个错误", errors.len());
+//! use dm_database_parser_sqllog::LogParserBuilder;
 //!
-//! // 直接使用解析好的 Sqllog
-//! for sqllog in sqllogs {
-//!     println!("用户: {}, SQL: {}", sqllog.parse_meta().username, sqllog.body());
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let parser = LogParserBuilder::new("sqllog.txt").build()?;
+//! for record in parser.iter().filter_by_exec_time(100) {
+//!     let sqllog = record?;
+//!     let exec_time = sqllog.exec_time()?.unwrap_or(0);
+//!     println!("{}ms - {}", exec_time, sqllog.body());
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ### 示例 3：批量导出
+//!
+//! 收集所有记录，提取元数据字段和 SQL 语句体，展示聚合操作模式。
+//!
+//! ```rust,no_run
+//! use dm_database_parser_sqllog::LogParserBuilder;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let parser = LogParserBuilder::new("sqllog.txt").build()?;
+//! let records: Vec<_> = parser.iter().filter_map(|r| r.ok()).collect();
+//! for sqllog in &records {
+//!     let meta = sqllog.parse_meta();
+//!     println!("{} | {} | {}", sqllog.ts, meta.username, sqllog.body());
 //! }
 //! # Ok(())
 //! # }
