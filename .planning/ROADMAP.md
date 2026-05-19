@@ -73,7 +73,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 07-01-PLAN.md — LogParserBuilder 链式 API，移除 LogParser::from_path
+- [x] 07-01-PLAN.md — LogParserBuilder 链式 API，移除 LogParser::from_path
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -136,7 +136,7 @@ Plans:
 | 4. CoreAlgo | v1.0 | 1/1 | Complete | 2026-04-25 |
 | 5. Parallel | v1.0 | 3/3 | Complete | 2026-04-26 |
 | 6. ErrorHandling | v1.1 | 2/2 | Complete   | 2026-05-19 |
-| 7. APIErgonomics | v1.1 | 0/3 | Not started | - |
+| 7. APIErgonomics | v1.1 | 1/3 | In Progress|  |
 | 8. Documentation | v1.1 | 0/3 | Not started | - |
 | 9. Publishing | v1.1 | 0/1 | Not started | - |
 
