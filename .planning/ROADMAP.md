@@ -54,7 +54,14 @@ Plans:
   2. 用户可以调用 `iter().filter_by_exec_time(100)` 或 `filter_by_sql_contains("SELECT")` 等方法过滤记录，不需要手动写闭包解构 parse_performance_metrics
   3. 用户可以直接调用 `sqllog.exec_time()` / `sqllog.row_count()` 取值，不需要解构元组或 match parse_performance_metrics 的返回
   4. 用户可以实现 `FromSqllog` trait 将 Sqllog 转为自定义业务类型，并通过 `.map(T::from_sqllog)` 组合使用
-**Plans**: TBD
+**Plans**: 3 plans
+
+```
+Plans:
+- [ ] 07-01-PLAN.md — LogParserBuilder 链式 API，移除 LogParser::from_path
+- [ ] 07-02-PLAN.md — LogIterator 过滤方法（filter_by_exec_time / filter_by_sql_contains）
+- [ ] 07-03-PLAN.md — Sqllog 直接字段访问（exec_time/row_count）+ FromSqllog trait
+```
 
 ### Phase 8: Documentation
 **Goal**: 任何 Rust 开发者打开 docs.rs 页面或本地 `cargo doc` 后，能在 5 分钟内理解库用法并写出可运行代码
@@ -87,7 +94,7 @@ Plans:
 | 4. CoreAlgo | v1.0 | 1/1 | Complete | 2026-04-25 |
 | 5. Parallel | v1.0 | 3/3 | Complete | 2026-04-26 |
 | 6. ErrorHandling | v1.1 | 0/2 | Not started | - |
-| 7. APIErgonomics | v1.1 | 0/? | Not started | - |
+| 7. APIErgonomics | v1.1 | 0/3 | Not started | - |
 | 8. Documentation | v1.1 | 0/? | Not started | - |
 | 9. Publishing | v1.1 | 0/? | Not started | - |
 
