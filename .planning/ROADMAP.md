@@ -37,7 +37,13 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
   1. 调用方拿到 ParseError 时，能看到行号和原始内容片段，定位问题无需猜测
   2. 调用方可选择让 LogIterator 在遇到解析错误时跳过、收集或中止，行为由调用方控制而非库静默丢弃
   3. ParseError 可直接用于实现 `std::error::Error` 的错误处理链（`?` 运算符、`anyhow`、`thiserror` 等生态均可接入）
-**Plans**: TBD
+**Plans**: 2 plans
+
+```
+Plans:
+- [ ] 06-01-PLAN.md — ParseError 添加 line_number 字段，LogIterator 行号追踪
+- [ ] 06-02-PLAN.md — skip_errors() 方法 + 行号与错误处理全套测试
+```
 
 ### Phase 7: APIErgonomics
 **Goal**: 用户可以用流畅的链式 API 配置解析器、直接访问字段、过滤记录，并将 Sqllog 映射到自定义类型
@@ -80,7 +86,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 | 3. HotPath | v1.0 | 2/2 | Complete | 2026-04-24 |
 | 4. CoreAlgo | v1.0 | 1/1 | Complete | 2026-04-25 |
 | 5. Parallel | v1.0 | 3/3 | Complete | 2026-04-26 |
-| 6. ErrorHandling | v1.1 | 0/? | Not started | - |
+| 6. ErrorHandling | v1.1 | 0/2 | Not started | - |
 | 7. APIErgonomics | v1.1 | 0/? | Not started | - |
 | 8. Documentation | v1.1 | 0/? | Not started | - |
 | 9. Publishing | v1.1 | 0/? | Not started | - |
