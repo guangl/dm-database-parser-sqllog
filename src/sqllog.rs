@@ -486,3 +486,33 @@ pub struct PerformanceMetrics<'a> {
     /// 完整的 SQL 语句
     pub sql: Cow<'a, str>,
 }
+
+/// 从 `Sqllog` 映射到自定义类型的 trait。
+///
+/// 类似标准库的 `From` trait，但专用于 `Sqllog` → 目标类型的转换。
+/// 用户实现此 trait 后，可通过 `.map(MyType::from_sqllog)` 在迭代器链中组合使用。
+///
+/// # Example
+/// ```rust
+/// use dm_database_parser_sqllog::{FromSqllog, Sqllog};
+///
+/// struct MyRecord {
+///     timestamp: String,
+///     sql: String,
+/// }
+///
+/// impl FromSqllog for MyRecord {
+///     fn from_sqllog(s: Sqllog<'_>) -> Self {
+///         MyRecord {
+///             timestamp: s.ts.to_string(),
+///             sql: s.body().to_string(),
+///         }
+///     }
+/// }
+/// ```
+pub trait FromSqllog {
+    /// 从 `Sqllog` 消费方式创建 `Self`。
+    ///
+    /// `sqllog` 按值传入；实现者可以获得字段所有权。
+    fn from_sqllog(s: Sqllog<'_>) -> Self;
+}

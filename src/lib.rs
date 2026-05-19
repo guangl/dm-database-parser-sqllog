@@ -74,4 +74,4 @@ pub use error::ParseError;
 pub use parser::{
     FileEncodingHint, LogIterator, LogParser, LogParserBuilder, RecordIndex, parse_record,
 };
-pub use sqllog::{MetaParts, PerformanceMetrics, Sqllog};
+pub use sqllog::{FromSqllog, MetaParts, PerformanceMetrics, Sqllog};
