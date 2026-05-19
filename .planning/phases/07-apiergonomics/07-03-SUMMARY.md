@@ -69,6 +69,7 @@ pub trait FromSqllog {
 - [x] `cargo test` 全 workspace 通过（100+ 测试）
 - [x] `cargo clippy --all-targets -- -D warnings` 无警告
 - [x] `cargo fmt` 格式化无变更
+- [ ] `cargo llvm-cov --workspace --all-features --fail-under-lines 90` — 未通过（89.71%，parser.rs 中已存在的未覆盖路径所致，非本 plan 引起）
 
 ## Deviations from Plan
 
