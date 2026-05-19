@@ -1,4 +1,4 @@
-use dm_database_parser_sqllog::LogParser;
+use dm_database_parser_sqllog::LogParserBuilder;
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -11,7 +11,7 @@ fn iterator_handles_crlf_and_eof_without_newline() {
         "2025-11-17 16:09:42.123 (EP[0] sess:2 thrd:3 user:u trxid:3 stmt:4 appname:app) SELECT 2"; // 无结尾换行
     write!(file, "{}{}", rec1, rec2_no_nl).unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let mut it = parser.iter();
 
     let r1 = it.next().unwrap().unwrap();
@@ -32,7 +32,7 @@ fn iterator_multiline_detection() {
     let content = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:app) SELECT\n  *\n  FROM dual\nEXECTIME: 0(ms) ROWCOUNT: 1(rows) EXEC_ID: 1.\n";
     file.write_all(content.as_bytes()).unwrap();
 
-    let parser = LogParser::from_path(file.path()).unwrap();
+    let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let mut it = parser.iter();
     let r = it.next().unwrap().unwrap();
     assert!(r.body().contains("FROM dual"));

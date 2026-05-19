@@ -14,10 +14,10 @@
 //! ### 从文件迭代处理 Sqllogs（推荐）
 //!
 //! ```rust,no_run
-//! use dm_database_parser_sqllog::LogParser;
+//! use dm_database_parser_sqllog::LogParserBuilder;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let parser = LogParser::from_path("sqllog.txt")?;
+//! let parser = LogParserBuilder::new("sqllog.txt").build()?;
 //! for result in parser.iter() {
 //!     match result {
 //!         Ok(sqllog) => {
@@ -37,7 +37,7 @@
 //! ```rust,no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // 若需要一次性加载所有记录到内存，可从迭代器收集：
-//! let parser = dm_database_parser_sqllog::LogParser::from_path("sqllog.txt")?;
+//! let parser = dm_database_parser_sqllog::LogParserBuilder::new("sqllog.txt").build()?;
 //! let results: Vec<_> = parser.iter().collect();
 //! let sqllogs: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok().cloned()).collect();
 //! let errors: Vec<_> = results.iter().filter_map(|r| r.as_ref().err().cloned()).collect();
@@ -71,5 +71,5 @@ pub(crate) mod parser;
 pub(crate) mod sqllog;
 
 pub use error::ParseError;
-pub use parser::{LogIterator, LogParser, RecordIndex, parse_record};
+pub use parser::{FileEncodingHint, LogIterator, LogParser, LogParserBuilder, RecordIndex, parse_record};
 pub use sqllog::{MetaParts, PerformanceMetrics, Sqllog};

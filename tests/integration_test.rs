@@ -1,4 +1,4 @@
-use dm_database_parser_sqllog::LogParser;
+use dm_database_parser_sqllog::LogParserBuilder;
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -10,7 +10,7 @@ fn test_parser_lazy_loading() {
     file.write_all(log_content.as_bytes()).unwrap();
     let path = file.path();
 
-    let parser = LogParser::from_path(path).unwrap();
+    let parser = LogParserBuilder::new(path).build().unwrap();
     let mut iter = parser.iter();
 
     let record = iter.next().unwrap().unwrap();
@@ -36,7 +36,7 @@ fn test_parser_multiline() {
     file.write_all(log_content.as_bytes()).unwrap();
     let path = file.path();
 
-    let parser = LogParser::from_path(path).unwrap();
+    let parser = LogParserBuilder::new(path).build().unwrap();
     let mut iter = parser.iter();
 
     let record = iter.next().unwrap().unwrap();

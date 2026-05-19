@@ -7,6 +7,7 @@ use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::borrow::Cow;
 use std::fs::File;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use crate::error::ParseError;
@@ -22,20 +23,139 @@ static FINDER_CLOSE_META: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::n
 /// Shared across threads via LazyLock; constructed once on first use.
 static FINDER_RECORD_START: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"\n20"));
 
+/// 文件编码提示，用于指示日志文件的字符编码。
+///
+/// 传递给 [`LogParserBuilder::encoding_hint`] 以跳过自动编码探测。
+/// 如果未指定，构建器会自动对文件首尾采样以确定编码。
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
-pub(crate) enum FileEncodingHint {
+pub enum FileEncodingHint {
+    /// 自动探测编码（默认行为）
     #[default]
     Auto,
+    /// 文件使用 UTF-8 编码
     Utf8,
+    /// 文件使用 GB18030 编码
     Gb18030,
 }
 
 pub struct LogParser {
     mmap: Mmap,
     encoding: FileEncodingHint,
+    parallel_threshold: usize,
 }
 
-/// 记录起始字节偏移列表，由 `LogParser::index()` 一次性构建。
+/// 配置并构建 [`LogParser`] 的构建器模式 API。
+///
+/// 提供链式调用的方式设置解析器参数，然后通过 [`build`] 方法
+/// 创建最终的 `LogParser` 实例。
+///
+/// # Example
+/// ```rust,no_run
+/// # use dm_database_parser_sqllog::LogParserBuilder;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let parser = LogParserBuilder::new("sqllog.txt")
+///     .threads(4)
+///     .parallel_threshold(64 * 1024 * 1024)
+///     .build()?;
+/// # Ok(())
+/// # }
+/// ```
+pub struct LogParserBuilder {
+    path: PathBuf,
+    threads: Option<usize>,
+    parallel_threshold: Option<usize>,
+    encoding_hint: Option<FileEncodingHint>,
+}
+
+impl LogParserBuilder {
+    /// 创建一个新的 `LogParserBuilder`。
+    ///
+    /// `path` 是要解析的 SQL 日志文件的路径。
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+        Self {
+            path: path.as_ref().to_path_buf(),
+            threads: None,
+            parallel_threshold: None,
+            encoding_hint: None,
+        }
+    }
+
+    /// 设置并行扫描的线程数。
+    ///
+    /// 会尝试设置 Rayon 全局线程池。由于全局线程池只能设置一次，
+    /// 多次调用此方法时只有第一次实际生效。
+    pub fn threads(mut self, n: usize) -> Self {
+        self.threads = Some(n);
+        self
+    }
+
+    /// 设置并行扫描的阈值（字节数）。
+    ///
+    /// 文件小于此阈值时将自动退化到单线程扫描，避免并行调度开销。
+    /// 默认值为 32 MB。
+    pub fn parallel_threshold(mut self, threshold: usize) -> Self {
+        self.parallel_threshold = Some(threshold);
+        self
+    }
+
+    /// 设置文件编码提示。
+    ///
+    /// 如果指定了编码，构建器将跳过自动编码探测直接使用指定编码。
+    /// 如果未指定（默认），构建器会对文件首尾进行采样以自动检测编码。
+    pub fn encoding_hint(mut self, hint: FileEncodingHint) -> Self {
+        self.encoding_hint = Some(hint);
+        self
+    }
+
+    /// 构建并返回 [`LogParser`] 实例。
+    ///
+    /// 执行内存映射和编码探测。如果发生 I/O 错误则返回 [`ParseError::IoError`]。
+    pub fn build(self) -> Result<LogParser, ParseError> {
+        // 如果并行线程数已配置，尝试设置 rayon 全局线程池
+        // build_global 只能调用一次；如已配置则静默忽略。
+        if let Some(n) = self.threads {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(n)
+                .build_global();
+        }
+
+        let file = File::open(&self.path)
+            .map_err(|e| ParseError::IoError(e.to_string()))?;
+        let mmap = unsafe {
+            Mmap::map(&file).map_err(|e| ParseError::IoError(e.to_string()))?
+        };
+
+        #[cfg(unix)]
+        let _ = mmap.advise(Advice::Sequential);
+
+        // 根据 encoding_hint 确定编码
+        // Some(hint) 时跳过自动探测直接使用指定编码
+        // None 时执行与 from_path 相同的 head+tail 采样
+        let encoding = match self.encoding_hint {
+            Some(hint) => hint,
+            None => {
+                let head_size = mmap.len().min(64 * 1024);
+                let tail_start = mmap.len().saturating_sub(4 * 1024).max(head_size);
+                let head_ok = simd_from_utf8(&mmap[..head_size]).is_ok();
+                let tail_ok = tail_start >= mmap.len()
+                    || simd_from_utf8(&mmap[tail_start..]).is_ok();
+                if head_ok && tail_ok {
+                    FileEncodingHint::Utf8
+                } else {
+                    FileEncodingHint::Gb18030
+                }
+            }
+        };
+
+        let parallel_threshold = self.parallel_threshold.unwrap_or(32 * 1024 * 1024);
+
+        Ok(LogParser {
+            mmap,
+            encoding,
+            parallel_threshold,
+        })
+    }
+}
 /// 每个元素是某条记录在内存映射缓冲区内的绝对字节偏移。
 /// 用于两阶段并行扫描：先建索引，再按记录数均匀分区给多线程。
 pub struct RecordIndex {
@@ -55,41 +175,6 @@ impl RecordIndex {
 }
 
 impl LogParser {
-    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ParseError> {
-        let file = File::open(path).map_err(|e| ParseError::IoError(e.to_string()))?;
-        let mmap = unsafe { Mmap::map(&file).map_err(|e| ParseError::IoError(e.to_string()))? };
-
-        // HOT-04: 告知 OS 以顺序模式预读 mmap 页面，减少 page fault 开销
-        // Unix-only；Windows 上 advise() 方法不存在，cfg 门控跳过
-        // 失败（如内核不支持）静默忽略，不影响正确性
-        #[cfg(unix)]
-        let _ = mmap.advise(Advice::Sequential);
-
-        // Detect encoding by sampling the first 64 KB and the last 4 KB.
-        // Sampling both ends catches the rare case where GB18030 content only
-        // appears after the initial UTF-8 section (e.g. late-joined non-ASCII
-        // usernames), while keeping the cost well below a full-file scan.
-        //
-        // Known limitation: the middle of large files (> ~68 KB) is not sampled.
-        // GB18030 multi-byte sequences that appear only in the middle of a very
-        // large log file may cause the file to be misclassified as UTF-8, leading
-        // to garbled output for those records. In practice DM log files either use
-        // GB18030 throughout or are entirely ASCII-safe UTF-8, so this edge case
-        // is unlikely. A full middle-window sample could be added if misclassification
-        // is observed in production.
-        let head_size = mmap.len().min(64 * 1024);
-        let tail_start = mmap.len().saturating_sub(4 * 1024).max(head_size);
-        let head_ok = simd_from_utf8(&mmap[..head_size]).is_ok();
-        let tail_ok = tail_start >= mmap.len() || simd_from_utf8(&mmap[tail_start..]).is_ok();
-        let encoding = if head_ok && tail_ok {
-            FileEncodingHint::Utf8
-        } else {
-            FileEncodingHint::Gb18030
-        };
-
-        Ok(Self { mmap, encoding })
-    }
-
     pub fn iter(&self) -> LogIterator<'_> {
         LogIterator {
             data: &self.mmap,
@@ -140,14 +225,14 @@ impl LogParser {
     ) -> impl rayon::iter::ParallelIterator<Item = Result<Sqllog<'_>, ParseError>> + '_ {
         use rayon::prelude::*;
 
-        const PAR_THRESHOLD: usize = 32 * 1024 * 1024;
+        let par_threshold = self.parallel_threshold;
 
         let data: &[u8] = &self.mmap;
         let encoding = self.encoding;
 
         let bounds: Vec<(usize, usize)> = if data.is_empty() {
             Vec::new()
-        } else if data.len() < PAR_THRESHOLD {
+        } else if data.len() < par_threshold {
             vec![(0, data.len())]
         } else {
             let num_threads = rayon::current_num_threads().max(1);
@@ -194,9 +279,9 @@ impl<'a> LogIterator<'a> {
     /// # 示例
     ///
     /// ```rust,no_run
-    /// # use dm_database_parser_sqllog::LogParser;
+    /// # use dm_database_parser_sqllog::LogParserBuilder;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let parser = LogParser::from_path("sqllog.txt")?;
+    /// let parser = LogParserBuilder::new("sqllog.txt").build()?;
     /// for sqllog in parser.iter().skip_errors() {
     ///     println!("SQL: {}", sqllog.body());
     /// }
@@ -569,5 +654,56 @@ mod tests {
     fn test_is_timestamp_start_trailing_garbage() {
         let ts = b"2025-11-17 16:09:41.123extra_garbage_here";
         assert!(is_timestamp_start(ts));
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn test_builder_encoding_hint_utf8() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut tmp = NamedTempFile::new().expect("tmp");
+        write!(tmp, "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:a) SELECT 1").unwrap();
+        tmp.as_file().sync_all().unwrap();
+
+        // 显式指定 UTF-8 编码
+        let parser = LogParserBuilder::new(tmp.path())
+            .encoding_hint(FileEncodingHint::Utf8)
+            .build()
+            .expect("build");
+        let record = parser.iter().next().unwrap().unwrap();
+        assert_eq!(record.ts, "2025-11-17 16:09:41.123");
+        assert!(record.body().contains("SELECT 1"));
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn test_builder_threads_and_threshold() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut tmp = NamedTempFile::new().expect("tmp");
+        writeln!(tmp, "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:a) SELECT 1").unwrap();
+        tmp.as_file().sync_all().unwrap();
+
+        // 配置 threads 和 parallel_threshold
+        let parser = LogParserBuilder::new(tmp.path())
+            .threads(2)
+            .parallel_threshold(1)
+            .build()
+            .expect("build");
+        let count = parser.iter().filter_map(|r| r.ok()).count();
+        assert_eq!(count, 1);
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn test_builder_file_not_found() {
+        let result = LogParserBuilder::new("/nonexistent/path.log").build();
+        assert!(result.is_err());
+        match result {
+            Err(ParseError::IoError(_)) => {}
+            _ => panic!("Expected IoError on nonexistent file"),
+        }
     }
 }
