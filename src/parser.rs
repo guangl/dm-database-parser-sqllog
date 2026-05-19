@@ -289,13 +289,14 @@ pub fn parse_record<'a>(record_bytes: &'a [u8]) -> Result<Sqllog<'a>, ParseError
     // rather than hardcoding true, which caused a redundant memchr scan for
     // single-line records and was semantically misleading.
     let is_multiline = memchr(b'\n', record_bytes).is_some();
-    parse_record_with_hint(record_bytes, is_multiline, FileEncodingHint::Auto)
+    parse_record_with_hint(record_bytes, is_multiline, FileEncodingHint::Auto, 0)
 }
 
 fn parse_record_with_hint<'a>(
     record_bytes: &'a [u8],
     is_multiline: bool,
     encoding_hint: FileEncodingHint,
+    line_number: u64,
 ) -> Result<Sqllog<'a>, ParseError> {
     // Find end of first line
     let (first_line, _rest) = if is_multiline {
@@ -325,7 +326,7 @@ fn parse_record_with_hint<'a>(
 
     // 1. Timestamp
     if first_line.len() < 23 {
-        return Err(make_invalid_format_error(first_line));
+        return Err(make_invalid_format_error(first_line, line_number));
     }
     // We assume ASCII/UTF-8 for timestamp
     // SAFETY: We validated the timestamp format in LogIterator::next using is_ts_millis_bytes,
@@ -338,7 +339,7 @@ fn parse_record_with_hint<'a>(
     let meta_start = match memchr(b'(', &first_line[23..]) {
         Some(idx) => 23 + idx,
         None => {
-            return Err(make_invalid_format_error(first_line));
+            return Err(make_invalid_format_error(first_line, line_number));
         }
     };
 
@@ -351,7 +352,7 @@ fn parse_record_with_hint<'a>(
     let meta_end = match meta_end {
         Some(idx) => idx,
         None => {
-            return Err(make_invalid_format_error(first_line));
+            return Err(make_invalid_format_error(first_line, line_number));
         }
     };
 
@@ -484,8 +485,9 @@ fn is_timestamp_start(bytes: &[u8]) -> bool {
 
 /// 将原始字节转换为 InvalidFormat 错误（错误路径，标注 cold 避免影响热路径代码布局）
 #[cold]
-fn make_invalid_format_error(raw_bytes: &[u8]) -> ParseError {
+fn make_invalid_format_error(raw_bytes: &[u8], line_number: u64) -> ParseError {
     ParseError::InvalidFormat {
         raw: String::from_utf8_lossy(raw_bytes).to_string(),
+        line_number,
     }
 }
