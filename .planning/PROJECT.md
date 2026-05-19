@@ -29,9 +29,19 @@
 - ✓ memmem SIMD 混合快速路径 + u64 掩码时间戳验证：+35.5% 单线程吞吐 — v1.0 (ALGO-01/02)
 - ✓ RecordIndex + index() 两阶段并行 API，32 MB 阈值自动退化串行 — v1.0 (PAR-01/03)
 
+## Current Milestone: v1.1 API & Ergonomics
+
+**Goal:** 全面提升库的 API 易用性和文档质量，发布 v1.1.0
+
+**Target features:**
+- 错误处理改善：ParseError 类型重构，更清晰的错误信息和上下文
+- 文档 / 示例：rustdoc 全覆盖，quick start，常用场景代码示例
+- 新 API：过滤方法（filter_by_exec_time 等）、Builder 模式（LogParserBuilder）、Iterator adapter（FromSqllog trait）、按需取字段 API
+- crates.io 发布准备：CHANGELOG、Cargo.toml metadata 完善、语义化版本
+
 ### Active
 
-（下一 milestone 待定）
+（v1.1 需求定义中）
 
 ### Known Gaps
 
@@ -87,4 +97,4 @@
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-26 after v1.0 milestone*
+*Last updated: 2026-05-19 — v1.1 milestone started*

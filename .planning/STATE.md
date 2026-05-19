@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: Performance Optimization
-current_phase: 05
-current_plan: 3
-status: shipped
-last_updated: "2026-04-26"
+milestone: v1.1
+milestone_name: API & Ergonomics
+status: planning
+last_updated: "2026-05-19T03:17:23.162Z"
+last_activity: 2026-05-19
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 10
-  completed_plans: 10
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # STATE: dm-database-parser-sqllog 性能优化
@@ -31,22 +30,20 @@ See: .planning/PROJECT.md (updated 2026-04-26)
 
 ## Current Position
 
-**Milestone Status:** ✅ SHIPPED — v1.0 Performance Optimization (2026-04-26)
-
-```
-Progress: [ Phase 1 ][ Phase 2 ][ Phase 3 ][ Phase 4 ][ Phase 5 ]
-           [  DONE  ] [  DONE  ] [  DONE  ] [  DONE  ] [  DONE  ]
-```
-
----
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-05-19 — Milestone v1.1 started
 
 ## Performance Metrics
 
 **Baseline (at project start):**
+
 - File: 5 MB synthetic, uniform single-line records (~206 bytes each)
 - Throughput: ~7.6 GB/s, ~674,425 ns total（仅 iter().count()）
 
 **Final (v1.0 shipped):**
+
 - memmem 混合快速路径（Phase 4） + 两阶段并行架构（Phase 5）
 - Single-thread: **8.67 GiB/s（+35.5% vs Phase 3 基线）**
 - Parallel (10 cores): 8.57 GiB/s（speedup ≈ 1.01x — Amdahl 定律限制）
