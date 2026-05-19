@@ -1,5 +1,27 @@
 # MILESTONES
 
+## v1.1 API & Ergonomics (Shipped: 2026-05-19)
+
+**Phases completed:** 4 phases, 9 plans, 9 tasks
+**Timeline:** 2026-05-19（1 天）
+**Code:** 1,453 行 Rust（src）
+**Commits:** 53
+
+### Key Accomplishments
+
+1. **ParseError 增强** — line_number 字段 + skip_errors() 错误策略，错误信息包含行号和原始内容
+2. **LogParserBuilder 链式 API** — 取代 LogParser::from_path，支持 threads()/parallel_threshold()/encoding_hint()
+3. **过滤方法 + 字段访问** — filter_by_exec_time/filter_by_sql_contains + exec_time()/row_count() + FromSqllog trait
+4. **文档全覆盖** — rustdoc 零 warning + 3 个可运行 # Examples + 2 个独立示例
+5. **crates.io 发布就绪** — CHANGELOG v1.1.0 + Cargo.toml 元数据 + README 6 节重写 + cargo publish --dry-run 通过
+
+### Archive
+
+- `.planning/milestones/v1.1-ROADMAP.md` — 完整阶段归档
+- `.planning/milestones/v1.1-REQUIREMENTS.md` — 需求完成状态归档
+
+---
+
 ## v1.0 — Performance Optimization
 
 **Shipped:** 2026-04-26
