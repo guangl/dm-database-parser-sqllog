@@ -185,6 +185,35 @@ pub struct LogIterator<'a> {
     line_number: u64,
 }
 
+impl<'a> LogIterator<'a> {
+    /// 返回一个跳过解析错误的迭代器。
+    ///
+    /// 调用 [`iter()`] 返回的迭代器会产生 `Result<Sqllog, ParseError>`。
+    /// 如果只关心成功解析的记录而希望忽略格式错误的行，可以使用 `skip_errors()`。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,no_run
+    /// # use dm_database_parser_sqllog::LogParser;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let parser = LogParser::from_path("sqllog.txt")?;
+    /// for sqllog in parser.iter().skip_errors() {
+    ///     println!("SQL: {}", sqllog.body());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # 注意
+    ///
+    /// - `par_iter()` 不支持此方法（它返回 Rayon 的 `ParallelIterator`，不是 `LogIterator`）。
+    /// - `skip_errors` 不改变内部行号行为。如果需要在调试时查看错误上下文，请使用原生的
+    ///   [`iter()`] 遍历 `Result` 并检查错误信息。
+    pub fn skip_errors(self) -> impl Iterator<Item = Sqllog<'a>> + 'a {
+        self.filter_map(Result::ok)
+    }
+}
+
 impl<'a> Iterator for LogIterator<'a> {
     type Item = Result<Sqllog<'a>, ParseError>;
 
