@@ -46,7 +46,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 Plans:
 **Wave 1**
 
-- [ ] 06-01-PLAN.md — ParseError 添加 line_number 字段，LogIterator 行号追踪
+- [x] 06-01-PLAN.md — ParseError 添加 line_number 字段，LogIterator 行号追踪
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -135,7 +135,7 @@ Plans:
 | 3. HotPath | v1.0 | 2/2 | Complete | 2026-04-24 |
 | 4. CoreAlgo | v1.0 | 1/1 | Complete | 2026-04-25 |
 | 5. Parallel | v1.0 | 3/3 | Complete | 2026-04-26 |
-| 6. ErrorHandling | v1.1 | 0/2 | Not started | - |
+| 6. ErrorHandling | v1.1 | 1/2 | In Progress|  |
 | 7. APIErgonomics | v1.1 | 0/3 | Not started | - |
 | 8. Documentation | v1.1 | 0/3 | Not started | - |
 | 9. Publishing | v1.1 | 0/1 | Not started | - |
