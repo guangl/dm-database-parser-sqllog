@@ -8,28 +8,28 @@
 
 ### ERR — 错误处理
 
-- [ ] **ERR-01**: 用户可获取包含行号和原始内容的详细错误信息（ParseError 变体细化）
-- [ ] **ERR-02**: 用户可选择跳过或捕获 LogIterator 内部的解析错误，而不是被默默丢弃
-- [ ] **ERR-03**: ParseError 实现标准 `std::error::Error + Display + Debug` trait
+- [x] **ERR-01**: 用户可获取包含行号和原始内容的详细错误信息（ParseError 变体细化）
+- [x] **ERR-02**: 用户可选择跳过或捕获 LogIterator 内部的解析错误，而不是被默默丢弃
+- [x] **ERR-03**: ParseError 实现标准 `std::error::Error + Display + Debug` trait
 
 ### DOC — 文档与示例
 
-- [ ] **DOC-01**: 所有 pub 类型、方法、字段均有 rustdoc 注释
-- [ ] **DOC-02**: crate-level 文档包含 3-5 个可运行的 Quick Start 代码示例
-- [ ] **DOC-03**: `examples/` 目录包含至少 2 个独立可运行示例（如 filter_slow_queries.rs）
+- [x] **DOC-01**: 所有 pub 类型、方法、字段均有 rustdoc 注释
+- [x] **DOC-02**: crate-level 文档包含 3-5 个可运行的 Quick Start 代码示例
+- [x] **DOC-03**: `examples/` 目录包含至少 2 个独立可运行示例（如 filter_slow_queries.rs）
 
 ### API — 新接口与易用性
 
-- [ ] **API-01**: `LogParserBuilder` 支持线程数、并行阈值、编码提示的链式配置
-- [ ] **API-02**: Iterator 提供专用过滤方法（`filter_by_exec_time`、`filter_by_sql_contains` 等）
-- [ ] **API-03**: `Sqllog` 提供直接字段访问方法（`exec_time()`、`row_count()` 等）避免手动解构
-- [ ] **API-04**: `FromSqllog` trait 允许用户将 `Sqllog` 映射到自定义类型
+- [x] **API-01**: `LogParserBuilder` 支持线程数、并行阈值、编码提示的链式配置
+- [x] **API-02**: Iterator 提供专用过滤方法（`filter_by_exec_time`、`filter_by_sql_contains` 等）
+- [x] **API-03**: `Sqllog` 提供直接字段访问方法（`exec_time()`、`row_count()` 等）避免手动解构
+- [x] **API-04**: `FromSqllog` trait 允许用户将 `Sqllog` 映射到自定义类型
 
 ### PUB — 发布准备
 
-- [ ] **PUB-01**: 新增 `CHANGELOG.md`（Keep a Changelog 格式，含 v1.0 历史和 v1.1 变更）
-- [ ] **PUB-02**: `Cargo.toml` 完整填写 description、keywords、categories、repository、documentation 字段
-- [ ] **PUB-03**: `README.md` 包含安装说明、快速开始、功能列表、性能数据
+- [x] **PUB-01**: 新增 `CHANGELOG.md`（Keep a Changelog 格式，含 v1.0 历史和 v1.1 变更）
+- [x] **PUB-02**: `Cargo.toml` 完整填写 description、keywords、categories、repository、documentation 字段
+- [x] **PUB-03**: `README.md` 包含安装说明、快速开始、功能列表、性能数据
 
 ## Future Requirements
 
@@ -56,19 +56,19 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ERR-01 | Phase 6 | Pending |
-| ERR-02 | Phase 6 | Pending |
-| ERR-03 | Phase 6 | Pending |
-| DOC-01 | Phase 8 | Pending |
-| DOC-02 | Phase 8 | Pending |
-| DOC-03 | Phase 8 | Pending |
-| API-01 | Phase 7 | Pending |
-| API-02 | Phase 7 | Pending |
-| API-03 | Phase 7 | Pending |
-| API-04 | Phase 7 | Pending |
-| PUB-01 | Phase 9 | Pending |
-| PUB-02 | Phase 9 | Pending |
-| PUB-03 | Phase 9 | Pending |
+| ERR-01 | Phase 6 | Complete |
+| ERR-02 | Phase 6 | Complete |
+| ERR-03 | Phase 6 | Complete |
+| DOC-01 | Phase 8 | Complete |
+| DOC-02 | Phase 8 | Complete |
+| DOC-03 | Phase 8 | Complete |
+| API-01 | Phase 7 | Complete |
+| API-02 | Phase 7 | Complete |
+| API-03 | Phase 7 | Complete |
+| API-04 | Phase 7 | Complete |
+| PUB-01 | Phase 9 | Complete |
+| PUB-02 | Phase 9 | Complete |
+| PUB-03 | Phase 9 | Complete |
 
 **Coverage:**
 - v1.1 requirements: 13 total
