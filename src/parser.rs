@@ -38,6 +38,13 @@ pub enum FileEncodingHint {
     Gb18030,
 }
 
+/// SQL 日志文件解析器，提供对达梦数据库 SQL 日志的内存映射和迭代解析。
+///
+/// 通过 [`LogParserBuilder`] 构建实例。内部使用 `memmap2` 进行内存映射，
+/// 自动检测文件编码（UTF-8 或 GB18030）。
+///
+/// 解析操作是惰性的——记录在调用 [`iter`](LogParser::iter()) 或
+/// [`par_iter`](LogParser::par_iter()) 时逐条解析，不会预先加载所有数据到内存。
 pub struct LogParser {
     mmap: Mmap,
     encoding: FileEncodingHint,
@@ -46,8 +53,8 @@ pub struct LogParser {
 
 /// 配置并构建 [`LogParser`] 的构建器模式 API。
 ///
-/// 提供链式调用的方式设置解析器参数，然后通过 [`build`] 方法
-/// 创建最终的 `LogParser` 实例。
+/// 提供链式调用的方式设置解析器参数，然后通过
+/// [`build`](LogParserBuilder::build()) 方法创建最终的 `LogParser` 实例。
 ///
 /// # Example
 /// ```rust,no_run
@@ -172,6 +179,14 @@ impl RecordIndex {
 }
 
 impl LogParser {
+    /// 返回顺序迭代器，逐条解析 SQL 日志记录。
+    ///
+    /// 每次调用返回新的 [`LogIterator`]，其 Item 为
+    /// `Result<Sqllog<'a>, ParseError>`。迭代器内部使用 `memchr` 快速定位
+    /// 记录边界，支持单行和多行记录。
+    ///
+    /// 如果需要跳过格式错误的记录，可链式调用
+    /// [`skip_errors`](LogIterator::skip_errors)。
     pub fn iter(&self) -> LogIterator<'_> {
         LogIterator {
             data: &self.mmap,
@@ -210,13 +225,14 @@ impl LogParser {
         RecordIndex { offsets }
     }
 
-    /// Returns a Rayon parallel iterator over all log records.
+    /// 返回 Rayon 并行迭代器，遍历所有 SQL 日志记录。
     ///
-    /// Large files (≥ PAR_THRESHOLD = 32 MB) are split into N byte-aligned chunks
-    /// at record boundaries — O(threads) overhead, not O(records). Small files use a
-    /// single partition so Rayon executes single-threaded without scheduling cost
-    /// (PAR-03 semantics). `index()` is intentionally not called here: a full
-    /// sequential pre-scan would double I/O on mmap'd, I/O-bound workloads.
+    /// 大文件（文件大小 ≥ 并行阈值，默认 32 MB）按记录边界分成 N 个字节对齐块，
+    /// 产生 O(threads) 开销而非 O(records)。小文件仅使用单个分区，
+    /// 因此 Rayon 以单线程执行，避免调度开销（PAR-03 语义）。
+    ///
+    /// 此方法内部不调用 `index()`：在内存映射的 I/O 密集型工作负载上，
+    /// 完整顺序预扫描会使 I/O 加倍。
     pub fn par_iter(
         &self,
     ) -> impl rayon::iter::ParallelIterator<Item = Result<Sqllog<'_>, ParseError>> + '_ {
@@ -257,6 +273,15 @@ impl LogParser {
     }
 }
 
+/// SQL 日志记录的顺序迭代器。
+///
+/// 由 [`LogParser::iter()`] 返回。每次调用 `next()` 解析一条记录，
+/// 返回 `Option<Result<Sqllog<'a>, ParseError>>`。
+///
+/// 支持通过以下方法链式处理：
+/// - [`skip_errors`](LogIterator::skip_errors) — 跳过解析错误的记录
+/// - [`filter_by_exec_time`](LogIterator::filter_by_exec_time) — 按执行时间过滤
+/// - [`filter_by_sql_contains`](LogIterator::filter_by_sql_contains) — 按 SQL 内容过滤
 pub struct LogIterator<'a> {
     data: &'a [u8],
     pos: usize,
@@ -270,7 +295,7 @@ pub struct LogIterator<'a> {
 impl<'a> LogIterator<'a> {
     /// 返回一个跳过解析错误的迭代器。
     ///
-    /// 调用 [`iter()`] 返回的迭代器会产生 `Result<Sqllog, ParseError>`。
+    /// 调用 [`iter()`](LogParser::iter()) 返回的迭代器会产生 `Result<Sqllog, ParseError>`。
     /// 如果只关心成功解析的记录而希望忽略格式错误的行，可以使用 `skip_errors()`。
     ///
     /// # 示例
@@ -290,7 +315,7 @@ impl<'a> LogIterator<'a> {
     ///
     /// - `par_iter()` 不支持此方法（它返回 Rayon 的 `ParallelIterator`，不是 `LogIterator`）。
     /// - `skip_errors` 不改变内部行号行为。如果需要在调试时查看错误上下文，请使用原生的
-    ///   [`iter()`] 遍历 `Result` 并检查错误信息。
+    ///   [`iter()`](LogParser::iter()) 遍历 `Result` 并检查错误信息。
     pub fn skip_errors(self) -> impl Iterator<Item = Sqllog<'a>> + 'a {
         self.filter_map(Result::ok)
     }
@@ -452,6 +477,16 @@ fn find_next_record_start(data: &[u8], from: usize) -> usize {
     data.len()
 }
 
+/// 从原始字节解析单条 SQL 日志记录。
+///
+/// 自动检测多行模式（包含嵌入换行的记录）。此函数是公开的独立解析入口，
+/// 适合已从文件中读出完整记录的调用方。
+///
+/// 内部调用 `parse_record_with_hint` 进行实际解析。
+/// [`LogIterator::next()`] 内部也调用此函数。
+///
+/// 对于完整的内存映射文件解析，推荐使用 [`LogParserBuilder`] 和
+/// [`LogParser::iter()`] 获得更好的性能和行号追踪。
 pub fn parse_record<'a>(record_bytes: &'a [u8]) -> Result<Sqllog<'a>, ParseError> {
     // Auto-detect multiline: inspect whether the bytes actually contain a newline
     // rather than hardcoding true, which caused a redundant memchr scan for
