@@ -71,7 +71,14 @@ Plans:
   1. `cargo doc --no-deps` 无任何 missing_docs 警告，所有公开类型、方法、字段均有说明文字
   2. crate 根文档中至少 3 个 `# Examples` 代码块可通过 `cargo test --doc` 运行且通过
   3. `examples/` 目录包含至少 2 个独立二进制示例（如 `filter_slow_queries.rs`），可用 `cargo run --example <name>` 直接执行
-**Plans**: TBD
+**Plans**: 3 plans
+
+```
+Plans:
+- [ ] 08-01-PLAN.md — parser.rs 和 error.rs 公开 API 中文 rustdoc（LogParser、LogIterator、LogParserBuilder、过滤方法、parse_record + error.rs line_number 字段）
+- [ ] 08-02-PLAN.md — sqllog.rs 新增 API rustdoc + lib.rs crate-level 文档（3 个可运行 # Examples）
+- [ ] 08-03-PLAN.md — examples/ 目录（filter_slow_queries.rs、batch_export.rs）
+```
 **UI hint**: no
 
 ### Phase 9: Publishing
@@ -100,8 +107,8 @@ Plans:
 | 5. Parallel | v1.0 | 3/3 | Complete | 2026-04-26 |
 | 6. ErrorHandling | v1.1 | 0/2 | Not started | - |
 | 7. APIErgonomics | v1.1 | 0/3 | Not started | - |
-| 8. Documentation | v1.1 | 0/? | Not started | - |
+| 8. Documentation | v1.1 | 0/3 | Not started | - |
 | 9. Publishing | v1.1 | 0/1 | Not started | - |
 
 ---
-*Updated: 2026-05-19 — v1.1 roadmap added (Phases 6–9)*
+*Updated: 2026-05-19 — Phase 8 plans created (3 plans)*
