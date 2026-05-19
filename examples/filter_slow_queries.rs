@@ -24,12 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for result in parser.iter().filter_by_exec_time(100) {
         let record = result?;
         let exec_time_ms = record.exec_time()?.unwrap_or(0);
-        println!(
-            "{} | {}ms | {}",
-            record.ts,
-            exec_time_ms,
-            record.body()
-        );
+        println!("{} | {}ms | {}", record.ts, exec_time_ms, record.body());
     }
 
     Ok(())
