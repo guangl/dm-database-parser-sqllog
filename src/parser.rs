@@ -119,11 +119,8 @@ impl LogParserBuilder {
                 .build_global();
         }
 
-        let file = File::open(&self.path)
-            .map_err(|e| ParseError::IoError(e.to_string()))?;
-        let mmap = unsafe {
-            Mmap::map(&file).map_err(|e| ParseError::IoError(e.to_string()))?
-        };
+        let file = File::open(&self.path).map_err(|e| ParseError::IoError(e.to_string()))?;
+        let mmap = unsafe { Mmap::map(&file).map_err(|e| ParseError::IoError(e.to_string()))? };
 
         #[cfg(unix)]
         let _ = mmap.advise(Advice::Sequential);
@@ -137,8 +134,8 @@ impl LogParserBuilder {
                 let head_size = mmap.len().min(64 * 1024);
                 let tail_start = mmap.len().saturating_sub(4 * 1024).max(head_size);
                 let head_ok = simd_from_utf8(&mmap[..head_size]).is_ok();
-                let tail_ok = tail_start >= mmap.len()
-                    || simd_from_utf8(&mmap[tail_start..]).is_ok();
+                let tail_ok =
+                    tail_start >= mmap.len() || simd_from_utf8(&mmap[tail_start..]).is_ok();
                 if head_ok && tail_ok {
                     FileEncodingHint::Utf8
                 } else {
@@ -296,6 +293,36 @@ impl<'a> LogIterator<'a> {
     ///   [`iter()`] 遍历 `Result` 并检查错误信息。
     pub fn skip_errors(self) -> impl Iterator<Item = Sqllog<'a>> + 'a {
         self.filter_map(Result::ok)
+    }
+
+    /// 过滤出执行时间大于等于 `min_ms` 毫秒的记录。
+    ///
+    /// 使用 `parse_performance_metrics()` 内部解析逻辑，不重复实现。
+    /// 不包含 EXECTIME 字段的记录和解析错误的记录将被过滤掉。
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use dm_database_parser_sqllog::LogParserBuilder;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let parser = LogParserBuilder::new("sqllog.txt").build()?;
+    /// for record in parser.iter().filter_by_exec_time(100) {
+    ///     // record: Result<Sqllog, ParseError>
+    ///     println!("{}", record?.body());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn filter_by_exec_time(
+        self,
+        min_ms: u64,
+    ) -> impl Iterator<Item = Result<Sqllog<'a>, ParseError>> + 'a {
+        self.filter(move |item| match item {
+            Ok(sqllog) => {
+                let metrics = sqllog.parse_performance_metrics();
+                metrics.exectime >= min_ms as f32
+            }
+            Err(_) => false,
+        })
     }
 }
 
@@ -663,7 +690,11 @@ mod tests {
         use tempfile::NamedTempFile;
 
         let mut tmp = NamedTempFile::new().expect("tmp");
-        write!(tmp, "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:a) SELECT 1").unwrap();
+        write!(
+            tmp,
+            "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:a) SELECT 1"
+        )
+        .unwrap();
         tmp.as_file().sync_all().unwrap();
 
         // 显式指定 UTF-8 编码
@@ -683,7 +714,11 @@ mod tests {
         use tempfile::NamedTempFile;
 
         let mut tmp = NamedTempFile::new().expect("tmp");
-        writeln!(tmp, "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:a) SELECT 1").unwrap();
+        writeln!(
+            tmp,
+            "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:a) SELECT 1"
+        )
+        .unwrap();
         tmp.as_file().sync_all().unwrap();
 
         // 配置 threads 和 parallel_threshold

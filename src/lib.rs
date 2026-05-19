@@ -71,5 +71,7 @@ pub(crate) mod parser;
 pub(crate) mod sqllog;
 
 pub use error::ParseError;
-pub use parser::{FileEncodingHint, LogIterator, LogParser, LogParserBuilder, RecordIndex, parse_record};
+pub use parser::{
+    FileEncodingHint, LogIterator, LogParser, LogParserBuilder, RecordIndex, parse_record,
+};
 pub use sqllog::{MetaParts, PerformanceMetrics, Sqllog};
