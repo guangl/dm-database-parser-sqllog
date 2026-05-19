@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - YYYY-MM-DD
+
+### Added
+
+- **`LogParserBuilder` 链式构建 API**：引入 Builder 模式替代 `LogParser::from_path`，支持链式配置（`threads()`、`build()`），提供更灵活且可扩展的构造方式。
+- **过滤方法**：`LogIterator` 新增 `filter_by_exec_time(ms)` 和 `filter_by_sql_contains(pattern)` 方法，支持在迭代时按执行时间和 SQL 内容过滤记录。
+- **直接字段访问**：`Sqllog` 新增 `exec_time()` 和 `row_count()` 方法，无需先调用 `parse_performance_metrics() ` 即可快速获取常用字段。
+- **`FromSqllog` trait**：允许用户自定义类型从 `Sqllog` 转换，配合 `filter_map()` 或 `map()` 实现类型安全的批量导出。
+- **独立运行示例**：新增 `examples/filter_slow_queries.rs`（慢查询过滤）和 `examples/batch_export.rs`（批量导出为 CSV）。
+
+### Changed
+
+- **`ParseError` 增强**：添加 `line_number` 字段，错误信息现在包含行号和日志片段内容，显著提升调试体验。
+- **公开 API rustdoc 全覆盖**：所有公开类型和方法补全文档注释，包括 3 个可直接运行的 `# Examples` 代码块（基础解析、慢查询过滤、批量导出）。
+- **README.md 全面重写**：按 crates.io 发布标准重新组织为 6 节结构（标题描述 / 安装 / Quick Start 3 场景 / 功能列表 / 性能数据 / API 概览）。
+
+### Fixed
+
+- **修复 Cargo.toml `homepage` 字段链接错误**：将 `dm-parser-sqllog` 修正为 `dm-database-parser-sqllog`。
+- **修复 CI 中文档相关配置**：确保文档构建和发布步骤与 v1.1.0 版本一致。
+
 ## [0.9.1] - 2026-04-13
 
 ### Changed
