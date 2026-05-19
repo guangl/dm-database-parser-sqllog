@@ -1,14 +1,14 @@
 [package]
 name = "dm-database-parser-sqllog"
-version = "0.9.1"
+version = "1.1.0"
 edition = "2024"
 authors = ["guangl"]
-description = "一个高性能的达梦数据库 sqllog 日志解析库，提供零分配或低分配的记录切分与解析功能"
+description = "一个高性能的达梦数据库 sqllog 日志解析库，支持 LogParserBuilder 链式配置、过滤方法、直接字段访问和 FromSqllog trait"
 license = "MIT"
 repository = "https://github.com/guangl/dm-database-parser-sqllog"
 documentation = "https://docs.rs/dm-database-parser-sqllog"
-homepage = "https://github.com/guangl/dm-parser-sqllog"
-keywords = ["sqllog", "parser", "dm-database"]
+homepage = "https://github.com/guangl/dm-database-parser-sqllog"
+keywords = ["sqllog", "parser", "dm-database", "dameng"]
 categories = ["parsing", "database", "text-processing"]
 exclude = [
     "benches",
