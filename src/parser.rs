@@ -324,6 +324,33 @@ impl<'a> LogIterator<'a> {
             Err(_) => false,
         })
     }
+
+    /// 过滤出 SQL 语句体包含指定 `pattern` 的记录。
+    ///
+    /// 使用 `body()` 方法获取 SQL 体并进行字符串包含检查。
+    /// 解析错误的记录将被过滤掉。pattern 匹配区分大小写。
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use dm_database_parser_sqllog::LogParserBuilder;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let parser = LogParserBuilder::new("sqllog.txt").build()?;
+    /// for record in parser.iter().filter_by_sql_contains("SELECT") {
+    ///     println!("{}", record?.body());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn filter_by_sql_contains(
+        self,
+        pattern: &str,
+    ) -> impl Iterator<Item = Result<Sqllog<'a>, ParseError>> + 'a {
+        let pattern = pattern.to_string();
+        self.filter(move |item| match item {
+            Ok(sqllog) => sqllog.body().contains(&pattern),
+            Err(_) => false,
+        })
+    }
 }
 
 impl<'a> Iterator for LogIterator<'a> {
