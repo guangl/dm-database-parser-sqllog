@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: API & Ergonomics
-status: planning
-last_updated: "2026-05-19T03:17:23.162Z"
-last_activity: 2026-05-19
+status: "Roadmap created, ready for /gsd:plan-phase 6"
+last_updated: "2026-05-19T03:43:31.756Z"
+last_activity: 2026-05-19 — v1.1 roadmap created (Phases 6–9)
 progress:
   total_phases: 4
   completed_phases: 0
