@@ -36,7 +36,7 @@ pub struct Sqllog<'a> {
     /// 原始内容（包含 Body 和 Indicators），延迟分割和解析
     pub content_raw: Cow<'a, [u8]>,
 
-    /// 提取出的方括号标签（例如 [SEL]、[ORA]），若无则为 None
+    /// 提取出的方括号标签（例如 `[SEL]`、`[ORA]`），若无则为 None
     pub tag: Option<Cow<'a, str>>,
 
     /// 文件级编码 hint（由 parser 探测），用于正确解码 content

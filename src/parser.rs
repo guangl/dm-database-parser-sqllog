@@ -46,7 +46,7 @@ pub struct LogParser {
 
 /// 配置并构建 [`LogParser`] 的构建器模式 API。
 ///
-/// 提供链式调用的方式设置解析器参数，然后通过 [`build`] 方法
+/// 提供链式调用的方式设置解析器参数，然后通过 [`Self::build`] 方法
 /// 创建最终的 `LogParser` 实例。
 ///
 /// # Example
@@ -270,7 +270,7 @@ pub struct LogIterator<'a> {
 impl<'a> LogIterator<'a> {
     /// 返回一个跳过解析错误的迭代器。
     ///
-    /// 调用 [`iter()`] 返回的迭代器会产生 `Result<Sqllog, ParseError>`。
+    /// 调用 [`iter()`](LogParser::iter) 返回的迭代器会产生 `Result<Sqllog, ParseError>`。
     /// 如果只关心成功解析的记录而希望忽略格式错误的行，可以使用 `skip_errors()`。
     ///
     /// # 示例
@@ -290,7 +290,7 @@ impl<'a> LogIterator<'a> {
     ///
     /// - `par_iter()` 不支持此方法（它返回 Rayon 的 `ParallelIterator`，不是 `LogIterator`）。
     /// - `skip_errors` 不改变内部行号行为。如果需要在调试时查看错误上下文，请使用原生的
-    ///   [`iter()`] 遍历 `Result` 并检查错误信息。
+    ///   [`iter()`](LogParser::iter) 遍历 `Result` 并检查错误信息。
     pub fn skip_errors(self) -> impl Iterator<Item = Sqllog<'a>> + 'a {
         self.filter_map(Result::ok)
     }
