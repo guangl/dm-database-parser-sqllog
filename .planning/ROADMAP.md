@@ -24,7 +24,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 
 - [x] **Phase 6: ErrorHandling** - 重构 ParseError，提供详细上下文，暴露迭代器错误策略 (completed 2026-05-19)
 - [x] **Phase 7: APIErgonomics** - 新增 Builder、直接字段访问、过滤方法、FromSqllog trait (completed 2026-05-19)
-- [ ] **Phase 8: Documentation** - rustdoc 全覆盖 + crate-level quick start + examples/ 目录
+- [x] **Phase 8: Documentation** - rustdoc 全覆盖 + crate-level quick start + examples/ 目录 (completed 2026-05-19)
 - [ ] **Phase 9: Publishing** - CHANGELOG、Cargo.toml metadata、README，crates.io 发布就绪
 
 ## Phase Details
@@ -98,9 +98,9 @@ Plans:
 ```
 Plans:
 
-- [ ] 08-01-PLAN.md — parser.rs 和 error.rs 公开 API 中文 rustdoc（LogParser、LogIterator、LogParserBuilder、过滤方法、parse_record + error.rs line_number 字段）
-- [ ] 08-02-PLAN.md — sqllog.rs 新增 API rustdoc + lib.rs crate-level 文档（3 个可运行 # Examples）
-- [ ] 08-03-PLAN.md — examples/ 目录（filter_slow_queries.rs、batch_export.rs）
+- [x] 08-01-PLAN.md — parser.rs 和 error.rs 公开 API 中文 rustdoc（LogParser、LogIterator、LogParserBuilder、过滤方法、parse_record + error.rs line_number 字段）
+- [x] 08-02-PLAN.md — sqllog.rs 新增 API rustdoc + lib.rs crate-level 文档（3 个可运行 # Examples）
+- [x] 08-03-PLAN.md — examples/ 目录（filter_slow_queries.rs、batch_export.rs）
 
 ```
 
@@ -137,7 +137,7 @@ Plans:
 | 5. Parallel | v1.0 | 3/3 | Complete | 2026-04-26 |
 | 6. ErrorHandling | v1.1 | 2/2 | Complete   | 2026-05-19 |
 | 7. APIErgonomics | v1.1 | 3/3 | Complete   | 2026-05-19 |
-| 8. Documentation | v1.1 | 0/3 | Not started | - |
+| 8. Documentation | v1.1 | 3/3 | Complete   | 2026-05-19 |
 | 9. Publishing | v1.1 | 0/1 | Not started | - |
 
 ---
