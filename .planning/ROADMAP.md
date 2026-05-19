@@ -82,7 +82,12 @@ Plans:
   1. `CHANGELOG.md` 存在且遵循 Keep a Changelog 格式，v1.0 和 v1.1 变更均有记录，`cargo changelog` 或人工审阅均可验证格式
   2. `cargo publish --dry-run` 成功，Cargo.toml 中 description、keywords、categories、repository、documentation 字段均已填写且无警告
   3. README.md 包含安装说明（`Cargo.toml` 片段）、Quick Start 代码、功能列表、v1.0 性能数据，新用户无需阅读源码即可上手
-**Plans**: TBD
+**Plans**: 1 plan
+
+```
+Plans:
+- [ ] 09-01-PLAN.md — CHANGELOG v1.1.0、Cargo.toml metadata 完善、README 重写
+```
 
 ## Progress
 
@@ -96,7 +101,7 @@ Plans:
 | 6. ErrorHandling | v1.1 | 0/2 | Not started | - |
 | 7. APIErgonomics | v1.1 | 0/3 | Not started | - |
 | 8. Documentation | v1.1 | 0/? | Not started | - |
-| 9. Publishing | v1.1 | 0/? | Not started | - |
+| 9. Publishing | v1.1 | 0/1 | Not started | - |
 
 ---
 *Updated: 2026-05-19 — v1.1 roadmap added (Phases 6–9)*
