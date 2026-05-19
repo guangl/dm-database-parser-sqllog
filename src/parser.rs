@@ -357,10 +357,13 @@ fn parse_record_with_hint<'a>(
     if first_line.len() < 23 {
         return Err(make_invalid_format_error(first_line, line_number));
     }
-    // We assume ASCII/UTF-8 for timestamp
-    // SAFETY: We validated the timestamp format in LogIterator::next using is_ts_millis_bytes,
-    // which ensures it contains only digits and separators.
-    let ts = unsafe { Cow::Borrowed(std::str::from_utf8_unchecked(&first_line[0..23])) };
+    // Use safe conversion — validates all 23 bytes are valid UTF-8.
+    // The performance cost of from_utf8 on a 23-byte string is negligible
+    // and removes the soundness dependency on upstream validation.
+    let ts = match std::str::from_utf8(&first_line[0..23]) {
+        Ok(s) => Cow::Borrowed(s),
+        Err(_) => return Err(make_invalid_format_error(first_line, line_number)),
+    };
 
     // 2. Meta
     // Format: TS (META) BODY
