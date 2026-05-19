@@ -122,7 +122,7 @@ Plans:
 ```
 Plans:
 
-- [ ] 09-01-PLAN.md — CHANGELOG v1.1.0、Cargo.toml metadata 完善、README 重写
+- [x] 09-01-PLAN.md — CHANGELOG v1.1.0、Cargo.toml metadata 完善、README 重写
 
 ```
 
