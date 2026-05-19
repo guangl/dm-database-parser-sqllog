@@ -30,28 +30,6 @@ pub enum ParseError {
         path: String,
     },
 
-    /// 无效的记录起始行
-    #[error("invalid record start line at line {line_number}: line does not match expected format | raw: {raw}")]
-    InvalidRecordStartLine {
-        /// 原始行内容
-        raw: String,
-        /// 文件行号
-        line_number: u64,
-    },
-
-    /// 整数解析失败
-    #[error("failed to parse {field} as integer at line {line_number}: {value} | raw: {raw}")]
-    IntParseError {
-        /// 字段名
-        field: String,
-        /// 字段值
-        value: String,
-        /// 原始内容
-        raw: String,
-        /// 文件行号
-        line_number: u64,
-    },
-
     /// IO 操作错误
     #[error("IO error: {0}")]
     IoError(String),
