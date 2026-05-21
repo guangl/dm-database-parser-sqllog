@@ -8,6 +8,15 @@
 
 在任意硬件上达到尽可能高的解析吞吐量（records/sec 和 GB/s），同时提供符合 Rust 生态习惯的易用 API。
 
+## Current Milestone: v2.0 Refactor, Filter & Async
+
+**Goal:** 重构 src/ 目录为功能分层结构，添加全字段可组合过滤，引入 tokio async API。
+
+**Target features:**
+- 代码重构：src/ 按功能分层（parser/ filter/ async_api/ record.rs error.rs）；整理内部模块边界；更新 examples 和 docs
+- 全字段过滤：14 个 Sqllog 字段全部可链式过滤（AND 组合），每字段有类型匹配谓词
+- Tokio async API：async_api/ 模块提供 async fn，内部用 spawn_blocking 封装；tokio feature flag 控制依赖
+
 ## Requirements
 
 ### Validated
@@ -53,7 +62,17 @@
 
 ### Active
 
-（下一里程碑需求定义中）
+- [ ] REFACTOR-01: src/ 按功能重组为 parser/ filter/ async_api/ 子模块 + record.rs + error.rs — v2.0
+- [ ] REFACTOR-02: 内部工具函数（tools.rs）分配到合适子模块，对外不可见 — v2.0
+- [ ] REFACTOR-03: lib.rs 顶层重导出所有公开类型，保持用户侧导入路径兼容 — v2.0
+- [ ] REFACTOR-04: examples/ 和文档更新以反映新结构和新 API — v2.0
+- [ ] FILTER-01: FilterBuilder 支持 14 个 Sqllog 字段的链式过滤条件 — v2.0
+- [ ] FILTER-02: 字符串字段支持 contains/eq/starts_with/ends_with 谓词 — v2.0
+- [ ] FILTER-03: 数值字段支持 eq/gt/lt/between 谓词（exectime/rowcount/exec_id/ep） — v2.0
+- [ ] FILTER-04: FilterBuilder 与 LogParser 迭代器无缝集成 — v2.0
+- [ ] ASYNC-01: async_api/ 提供 parse_file_async 等异步入口函数 — v2.0
+- [ ] ASYNC-02: 内部用 tokio::task::spawn_blocking 封装同步 mmap 解析 — v2.0
+- [ ] ASYNC-03: tokio feature flag 控制依赖，不强制所有用户引入 tokio — v2.0
 
 ### Known Gaps
 
@@ -113,4 +132,4 @@
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-19 — v1.1 milestone shipped*
+*Last updated: 2026-05-22 — v2.0 milestone started*
