@@ -61,33 +61,33 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| REFACTOR-01 | — | Pending |
-| REFACTOR-02 | — | Pending |
-| REFACTOR-03 | — | Pending |
-| REFACTOR-04 | — | Pending |
-| REFACTOR-05 | — | Pending |
-| REFACTOR-06 | — | Pending |
-| REFACTOR-07 | — | Pending |
-| FILTER-01 | — | Pending |
-| FILTER-02 | — | Pending |
-| FILTER-03 | — | Pending |
-| FILTER-04 | — | Pending |
-| FILTER-05 | — | Pending |
-| FILTER-06 | — | Pending |
-| FILTER-07 | — | Pending |
-| FILTER-08 | — | Pending |
-| FILTER-09 | — | Pending |
-| FILTER-10 | — | Pending |
-| ASYNC-01 | — | Pending |
-| ASYNC-02 | — | Pending |
-| ASYNC-03 | — | Pending |
-| ASYNC-04 | — | Pending |
+| REFACTOR-01 | Phase 10 | Pending |
+| REFACTOR-02 | Phase 10 | Pending |
+| REFACTOR-03 | Phase 10 | Pending |
+| REFACTOR-04 | Phase 10 | Pending |
+| REFACTOR-05 | Phase 10 | Pending |
+| REFACTOR-06 | Phase 10 | Pending |
+| REFACTOR-07 | Phase 10 | Pending |
+| FILTER-01 | Phase 11 | Pending |
+| FILTER-02 | Phase 11 | Pending |
+| FILTER-03 | Phase 11 | Pending |
+| FILTER-04 | Phase 11 | Pending |
+| FILTER-05 | Phase 11 | Pending |
+| FILTER-06 | Phase 11 | Pending |
+| FILTER-07 | Phase 11 | Pending |
+| FILTER-08 | Phase 11 | Pending |
+| FILTER-09 | Phase 11 | Pending |
+| FILTER-10 | Phase 11 | Pending |
+| ASYNC-01 | Phase 12 | Pending |
+| ASYNC-02 | Phase 12 | Pending |
+| ASYNC-03 | Phase 12 | Pending |
+| ASYNC-04 | Phase 12 | Pending |
 
 **Coverage:**
 - v2.0 requirements: 21 total
-- Mapped to phases: 0（roadmap 待创建）
-- Unmapped: 21 ⚠️
+- Mapped to phases: 21 / 21 ✓
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-22*
-*Last updated: 2026-05-22 after milestone v2.0 definition*
+*Last updated: 2026-05-22 — v2.0 roadmap created, all requirements mapped*

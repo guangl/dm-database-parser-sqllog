@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Refactor, Filter & Async
-status: planning
-last_updated: "2026-05-21T23:46:41.434Z"
-last_activity: 2026-05-21
+status: ready
+last_updated: "2026-05-22T00:00:00.000Z"
+last_activity: 2026-05-22
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,19 +21,25 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-19)
+See: .planning/PROJECT.md (updated 2026-05-22)
 
-**Core value:** 在任意硬件上达到尽可能高的解析吞吐量（records/sec 和 GB/s）
-**Current focus:** Milestone complete
+**Core value:** 在任意硬件上达到尽可能高的解析吞吐量（records/sec 和 GB/s），同时提供符合 Rust 生态习惯的易用 API。
+**Current focus:** v2.0 — Phase 10: Restructure
 
 ---
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-05-21 — Milestone v2.0 started
+```
+Milestone : v2.0 Refactor, Filter & Async
+Phase     : 10 — Restructure (not started)
+Plan      : —
+Status    : Roadmap created, ready for phase planning
+
+Progress  : [          ] 0 / 3 phases complete
+```
+
+---
 
 ## Performance Metrics
 
@@ -56,15 +62,31 @@ Last activity: 2026-05-21 — Milestone v2.0 started
 
 ---
 
-## Session Continuity
+## Accumulated Context
 
-**Last updated:** 2026-05-19 — v1.1 roadmap created
-**Next action:** `/gsd:plan-phase 6` 开始 ErrorHandling 阶段规划
+### Key Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| v2.0 3 个阶段（粒度 coarse）| 7+10+4 需求自然对应重构/过滤/异步三层构建顺序 |
+| Phase 12 async 返回 Vec<Sqllog<'static>> | mmap 是同步内存访问；spawn_blocking 内部需 owned 数据，打破 Cow<'a> 生命周期 |
+| tokio 作为可选 feature | 不应强制所有用户引入 tokio 依赖树 |
+
+### Todos
+
+- [ ] 规划 Phase 10（`/gsd:plan-phase 10`）
+- [ ] ASYNC-02 实现时需确认 Sqllog<'static> owned 数据策略
+
+### Blockers
+
+None.
 
 ---
-*Shipped: 2026-04-26 — v1.0 Performance Optimization complete*
-*Active: 2026-05-19 — v1.1 API & Ergonomics roadmap ready*
 
-## Operator Next Steps
+## Session Continuity
 
-- Start the next milestone with /gsd-new-milestone
+**Last updated:** 2026-05-22 — v2.0 roadmap created (3 phases, 21 requirements mapped)
+**Next action:** `/gsd:plan-phase 10` 开始 Restructure 阶段规划
+
+---
+*Active: 2026-05-22 — v2.0 Refactor, Filter & Async roadmap ready*
