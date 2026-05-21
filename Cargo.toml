@@ -20,6 +20,11 @@ exclude = [
     ".github",
     "*.json",
     ".gitignore",
+    ".agents",
+    ".gsd",
+    ".bg-shell",
+    ".mcp.json",
+    "skills-lock.json",
 ]
 
 [lib]
