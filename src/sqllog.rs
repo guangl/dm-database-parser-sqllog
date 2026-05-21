@@ -1,319 +1,262 @@
 use atoi::atoi;
-use encoding::DecoderTrap;
-use encoding::Encoding;
-use encoding::all::GB18030;
 use memchr::memchr;
-use memchr::memmem::Finder;
 use memchr::memrchr;
-use simdutf8::basic::from_utf8 as simd_from_utf8;
-use std::borrow::Cow;
-use std::sync::LazyLock;
-
-use crate::error::ParseError;
-use crate::parser::FileEncodingHint;
-
-/// Pre-built SIMD finders for performance indicators — avoids per-call initialization.
-static FINDER_EXECTIME: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"EXECTIME:"));
-static FINDER_ROWCOUNT: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"ROWCOUNT:"));
-static FINDER_EXEC_ID: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"EXEC_ID:"));
-
-/// Maximum byte length of an indicators section.
-/// Typical indicators ("EXECTIME: x(ms) ROWCOUNT: y(rows) EXEC_ID: z.") are ≤ 80 bytes.
-/// 256 is a conservative upper bound that covers unusual padding or long EXEC_ID values.
-const INDICATORS_WINDOW: usize = 256;
 
 /// SQL 日志记录
 ///
-/// 表示一条完整的 SQL 日志记录，包含时间戳、元数据、SQL 语句体和可选的性能指标。
+/// 表示一条完整的 SQL 日志记录，所有字段在解析时一次性填充。
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Sqllog<'a> {
+pub struct Sqllog {
     /// 时间戳，格式为 "YYYY-MM-DD HH:MM:SS.mmm"
-    pub ts: Cow<'a, str>,
+    pub ts: String,
 
-    /// 原始元数据字节（延迟解析）
-    pub meta_raw: Cow<'a, str>,
+    /// 方括号标签（例如 `[SEL]`、`[ORA]`），若无则为 None
+    pub tag: Option<String>,
 
-    /// 原始内容（包含 Body 和 Indicators），延迟分割和解析
-    pub content_raw: Cow<'a, [u8]>,
+    // ── 元数据字段 ──
+    /// EP（Execution Point）编号，范围 0-255
+    pub ep: u8,
 
-    /// 提取出的方括号标签（例如 `[SEL]`、`[ORA]`），若无则为 None
-    pub tag: Option<Cow<'a, str>>,
+    /// 会话 ID
+    pub sess_id: String,
 
-    /// 文件级编码 hint（由 parser 探测），用于正确解码 content
-    pub(crate) encoding: FileEncodingHint,
+    /// 线程 ID
+    pub thrd_id: String,
+
+    /// 用户名
+    pub username: String,
+
+    /// 事务 ID
+    pub trxid: String,
+
+    /// 语句 ID
+    pub statement: String,
+
+    /// 应用程序名称
+    pub appname: String,
+
+    /// 客户端 IP 地址
+    pub client_ip: String,
+
+    // ── SQL 语句体 ──
+    /// SQL 语句体
+    pub sql: String,
+
+    // ── 性能指标 ──
+    /// 执行时间（毫秒），无指标时为 0.0
+    pub exectime: f32,
+
+    /// 影响的行数，无指标时为 0
+    pub rowcount: u32,
+
+    /// 执行 ID，无指标时为 0
+    pub exec_id: i64,
 }
 
-impl<'a> Sqllog<'a> {
-    // ── 公开 API ─────────────────────────────────────────────────────────────
+/// 解析元数据：从 meta 字节切片中提取所有字段。
+///
+/// meta_bytes 必须为有效 UTF-8。
+pub(crate) fn parse_meta_from_bytes(meta_bytes: &[u8]) -> (u8, String, String, String, String, String, String, String) {
+    let mut ep: u8 = 0;
+    let mut sess_id = String::new();
+    let mut thrd_id = String::new();
+    let mut username = String::new();
+    let mut trxid = String::new();
+    let mut statement = String::new();
+    let mut appname = String::new();
+    let mut client_ip = String::new();
 
-    /// 获取 SQL 语句体（延迟分割）
-    pub fn body(&self) -> Cow<'a, str> {
-        let split = self.find_indicators_split();
-        let is_borrowed = matches!(&self.content_raw, Cow::Borrowed(_));
-        // SAFETY: body_bytes 是 content_raw 的子切片，与 content_raw 共享 'a 生命周期
-        unsafe { decode_content_bytes(&self.content_raw[..split], is_borrowed, self.encoding) }
-    }
+    let bytes = meta_bytes;
+    let len = bytes.len();
+    let mut idx = 0;
 
-    /// 获取 SQL 语句体的长度（不做 UTF-8 校验，不分配）
-    #[inline]
-    pub fn body_len(&self) -> usize {
-        self.find_indicators_split()
-    }
-
-    /// 获取 SQL 语句体的原始字节切片（不分配）
-    #[inline]
-    pub fn body_bytes(&self) -> &[u8] {
-        &self.content_raw[..self.find_indicators_split()]
-    }
-
-    /// 获取原始性能指标字符串（延迟分割）
-    pub fn indicators_raw(&self) -> Option<Cow<'a, str>> {
-        let split = self.find_indicators_split();
-        let ind_bytes = &self.content_raw[split..];
-        if ind_bytes.is_empty() {
-            return None;
+    while idx < len {
+        // Skip whitespace
+        while idx < len && bytes[idx] == b' ' {
+            idx += 1;
         }
-        let is_borrowed = matches!(&self.content_raw, Cow::Borrowed(_));
-        // SAFETY: ind_bytes 是 content_raw 的子切片，与 content_raw 共享 'a 生命周期
-        Some(unsafe { decode_content_bytes(ind_bytes, is_borrowed, self.encoding) })
-    }
-
-    /// 解析性能指标（sql 字段为空字符串）
-    pub fn parse_indicators(&self) -> Option<PerformanceMetrics<'static>> {
-        let ind_bytes = &self.content_raw[self.find_indicators_split()..];
-        if ind_bytes.is_empty() {
-            return None;
+        if idx >= len {
+            break;
         }
-        parse_indicators_from_bytes(ind_bytes)
-    }
 
-    /// 解析性能指标和 SQL 语句
-    ///
-    /// 返回包含 EXECTIME、ROWCOUNT、EXEC_ID 和 SQL 语句的 [`PerformanceMetrics`]。
-    ///
-    /// 当 tag 为 `"ORA"` 时，SQL 语句开头可能带有 `": "`，本方法会自动去除。
-    ///
-    /// # 实现说明
-    /// 仅调用一次 `find_indicators_split()`，body 解码与 indicators 解析均在同一
-    /// 次遍历中完成，`Cow::Borrowed` 路径全程零分配。
-    #[inline(always)]
-    pub fn parse_performance_metrics(&self) -> PerformanceMetrics<'a> {
-        let split = self.find_indicators_split();
-        let is_borrowed = matches!(&self.content_raw, Cow::Borrowed(_));
+        // Find token end
+        let start = idx;
+        while idx < len && bytes[idx] != b' ' {
+            idx += 1;
+        }
+        let part = &bytes[start..idx];
 
-        // SAFETY: 子切片与 content_raw 共享 'a 生命周期
-        let sql_raw =
-            unsafe { decode_content_bytes(&self.content_raw[..split], is_borrowed, self.encoding) };
-
-        let sql = if self.tag.as_deref() == Some("ORA") {
-            strip_ora_prefix(sql_raw)
-        } else {
-            sql_raw
-        };
-
-        let mut pm = parse_indicators_from_bytes(&self.content_raw[split..]).unwrap_or_default();
-        pm.sql = sql;
-        pm
-    }
-
-    /// 获取 EXECTIME 字段的值（毫秒）。
-    ///
-    /// 返回 `Result<Option<u64>, ParseError>`：
-    /// - `Ok(Some(v))` — EXECTIME 存在且解析成功
-    /// - `Ok(None)` — 记录不含 EXECTIME 字段
-    /// - `Err(e)` — 解析失败（当前实现中不会触发，为 API 契约保留）
-    ///
-    /// 内部复用 `parse_indicators()` 逻辑。
-    /// 如需精确的 f32 值，请使用 `parse_performance_metrics()`。
-    pub fn exec_time(&self) -> Result<Option<u64>, ParseError> {
-        Ok(match self.parse_indicators() {
-            None => None,
-            Some(m) if m.exectime > 0.0 => Some(m.exectime as u64),
-            Some(_) => None,
-        })
-    }
-
-    /// 获取 ROWCOUNT 字段的值（行数）。
-    ///
-    /// 返回 `Result<Option<u64>, ParseError>`：
-    /// - `Ok(Some(v))` — ROWCOUNT 存在且解析成功
-    /// - `Ok(None)` — 记录不含 ROWCOUNT 字段
-    /// - `Err(e)` — 解析失败（当前实现中不会触发）
-    ///
-    /// 内部复用 `parse_indicators()` 逻辑。
-    pub fn row_count(&self) -> Result<Option<u64>, ParseError> {
-        Ok(match self.parse_indicators() {
-            None => None,
-            Some(m) if m.rowcount > 0 => Some(m.rowcount as u64),
-            Some(_) => None,
-        })
-    }
-
-    /// 解析元数据
-    pub fn parse_meta(&self) -> MetaParts<'a> {
-        let meta_bytes = self.meta_raw.as_bytes();
-        let mut meta = MetaParts::default();
-        let len = meta_bytes.len();
-        let is_borrowed = matches!(&self.meta_raw, Cow::Borrowed(_));
-
-        let to_cow = |bytes: &[u8]| -> Cow<'a, str> {
-            if is_borrowed {
-                // For Utf8 / Auto encoding: meta_raw is Cow::Borrowed — bytes is a sub-slice
-                // of the memory-mapped buffer that lives for 'a.  The file was validated as
-                // UTF-8 during `from_path`, so the unchecked conversion is sound.
-                unsafe {
-                    Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                        bytes.as_ptr(),
-                        bytes.len(),
-                    )))
-                }
-            } else {
-                // For Gb18030 / Auto-fallback encoding: meta_raw is Cow::Owned (already decoded
-                // to a valid UTF-8 String).  We must NOT transmute the lifetime to 'a because
-                // the Owned String lives only as long as `self`, not 'a.  Return an owned copy.
-                Cow::Owned(
-                    std::str::from_utf8(bytes)
-                        .expect("meta_raw is always valid UTF-8")
-                        .to_string(),
-                )
+        // Parse EP[n]
+        if part.len() > 4
+            && part[0] == b'E'
+            && part[1] == b'P'
+            && part[2] == b'['
+            && part[part.len() - 1] == b']'
+        {
+            if let Some(ep_val) = atoi::<u8>(&part[3..part.len() - 1]) {
+                ep = ep_val;
             }
-        };
+            continue;
+        }
 
-        let mut idx = 0;
-        while idx < len {
-            // Skip whitespace
-            while idx < len && meta_bytes[idx] == b' ' {
-                idx += 1;
-            }
-            if idx >= len {
-                break;
-            }
+        // Find ':'
+        if let Some(sep) = memchr(b':', part) {
+            let val_bytes = &part[sep + 1..];
+            let val = String::from_utf8_lossy(val_bytes).into_owned();
 
-            // Find token end
-            let start = idx;
-            while idx < len && meta_bytes[idx] != b' ' {
-                idx += 1;
-            }
-            let part = &meta_bytes[start..idx];
-
-            // Parse EP[n]
-            if part.len() > 4
-                && part[0] == b'E'
-                && part[1] == b'P'
-                && part[2] == b'['
-                && part[part.len() - 1] == b']'
-            {
-                if let Some(ep) = atoi::<u8>(&part[3..part.len() - 1]) {
-                    meta.ep = ep;
-                }
-                continue;
-            }
-
-            // Find ':'
-            if let Some(sep) = memchr(b':', part) {
-                let key = &part[..sep];
-                let val = &part[sep + 1..];
-
-                match key {
-                    b"sess" => meta.sess_id = to_cow(val),
-                    b"thrd" => meta.thrd_id = to_cow(val),
-                    b"user" => meta.username = to_cow(val),
-                    b"trxid" => meta.trxid = to_cow(val),
-                    b"stmt" => meta.statement = to_cow(val),
-                    b"ip" => meta.client_ip = to_cow(val),
-                    b"appname" => {
-                        if !val.is_empty() {
-                            meta.appname = to_cow(val);
-                        } else {
-                            // Peek next token; treat it as appname only if it is not an ip field
-                            let mut peek = idx;
-                            while peek < len && meta_bytes[peek] == b' ' {
+            match &part[..sep] {
+                b"sess" => sess_id = val,
+                b"thrd" => thrd_id = val,
+                b"user" => username = val,
+                b"trxid" => trxid = val,
+                b"stmt" => statement = val,
+                b"ip" => client_ip = val,
+                b"appname" => {
+                    if !val_bytes.is_empty() {
+                        appname = val;
+                    } else {
+                        // Peek next token; treat it as appname only if it is not an ip field
+                        let mut peek = idx;
+                        while peek < len && bytes[peek] == b' ' {
+                            peek += 1;
+                        }
+                        if peek < len {
+                            let peek_start = peek;
+                            while peek < len && bytes[peek] != b' ' {
                                 peek += 1;
                             }
-                            if peek < len {
-                                let peek_start = peek;
-                                while peek < len && meta_bytes[peek] != b' ' {
-                                    peek += 1;
-                                }
-                                let next = &meta_bytes[peek_start..peek];
-                                if !(next.starts_with(b"ip:") || next.starts_with(b"ip::")) {
-                                    meta.appname = to_cow(next);
-                                    idx = peek;
-                                }
+                            let next = &bytes[peek_start..peek];
+                            if !(next.starts_with(b"ip:") || next.starts_with(b"ip::")) {
+                                appname = String::from_utf8_lossy(next).into_owned();
+                                idx = peek;
                             }
                         }
                     }
-                    _ => {}
                 }
+                _ => {}
             }
         }
-        meta
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
-
-    fn find_indicators_split(&self) -> usize {
-        let data = &self.content_raw;
-        let len = data.len();
-
-        // HOT-01: O(1) 早退 — DM 格式中有指标的记录以 '.' 结尾（EXEC_ID: N.）
-        // 或以 ')' 结尾（仅 EXECTIME/ROWCOUNT，格式为 N(ms)/N(rows)）。
-        // 跳过末尾 \n/\r，取最后一个有效字节；既非 '.' 也非 ')' 则无指标，直接返回。
-        let last_meaningful = data
-            .iter()
-            .rev()
-            .find(|&&b| b != b'\n' && b != b'\r')
-            .copied();
-        if last_meaningful != Some(b'.') && last_meaningful != Some(b')') {
-            return len;
-        }
-
-        let start = len.saturating_sub(INDICATORS_WINDOW);
-        let window = &data[start..];
-
-        // HOT-02: 单次反向扫描 ':' 字节，检查关键字前缀，记录最左命中位置。
-        // 替代 3 次独立 FinderRev::rfind 调用，减少 SIMD 启动开销。
-        let earliest = scan_earliest_indicator(window);
-
-        let split = start + earliest;
-        // CORR-03 验证守卫：假阳性（如 SQL 以指标关键字结尾）时 fallback 到全文。
-        if split < len && parse_indicators_from_bytes(&data[split..]).is_none() {
-            return len;
-        }
-        split
-    }
+    (ep, sess_id, thrd_id, username, trxid, statement, appname, client_ip)
 }
 
-// ── Module-level helpers ──────────────────────────────────────────────────────
+/// 解析性能指标：从 indicators 字节切片中提取 EXECTIME, ROWCOUNT, EXEC_ID。
+///
+/// 使用 memchr 扫描 ':' 和 '(' 定界符。
+pub(crate) fn parse_indicators_from_bytes(ind: &[u8]) -> (f32, u32, i64) {
+    if ind.is_empty() {
+        return (0.0, 0, 0);
+    }
 
-/// 在 window 内单次反向扫描 ':' 字节，匹配已知指标关键字前缀。
+    let mut exectime: f32 = 0.0;
+    let mut rowcount: u32 = 0;
+    let mut exec_id: i64 = 0;
+
+    // Scan for EXECTIME
+    let mut search_start = 0;
+    while search_start < ind.len() {
+        if let Some(colon) = memchr(b':', &ind[search_start..]) {
+            let colon_pos = search_start + colon;
+            if colon_pos >= 8 && &ind[colon_pos - 8..colon_pos] == b"EXECTIME" {
+                let ss = colon_pos + 1;
+                if let Some(pi) = memchr(b'(', &ind[ss..]) {
+                    let val_bytes = &ind[ss..ss + pi];
+                    let val_str = String::from_utf8_lossy(val_bytes).trim_ascii().to_string();
+                    if let Ok(t) = val_str.parse::<f32>() {
+                        exectime = t;
+                    }
+                }
+                break;
+            }
+            search_start = colon_pos + 1;
+        } else {
+            break;
+        }
+    }
+
+    // Scan for ROWCOUNT
+    search_start = 0;
+    while search_start < ind.len() {
+        if let Some(colon) = memchr(b':', &ind[search_start..]) {
+            let colon_pos = search_start + colon;
+            if colon_pos >= 8 && &ind[colon_pos - 8..colon_pos] == b"ROWCOUNT" {
+                let ss = colon_pos + 1;
+                if let Some(pi) = memchr(b'(', &ind[ss..]) {
+                    let val_bytes = &ind[ss..ss + pi];
+                    let val_str = String::from_utf8_lossy(val_bytes).trim_ascii().to_string();
+                    if let Ok(r) = val_str.parse::<u32>() {
+                        rowcount = r;
+                    }
+                }
+                break;
+            }
+            search_start = colon_pos + 1;
+        } else {
+            break;
+        }
+    }
+
+    // Scan for EXEC_ID
+    search_start = 0;
+    while search_start < ind.len() {
+        if let Some(colon) = memchr(b':', &ind[search_start..]) {
+            let colon_pos = search_start + colon;
+            if colon_pos >= 7 && &ind[colon_pos - 7..colon_pos] == b"EXEC_ID" {
+                let ss = colon_pos + 1;
+                let end = memchr(b'.', &ind[ss..]).map(|i| ss + i).unwrap_or(ind.len());
+                let val_bytes = &ind[ss..end];
+                let val_str = String::from_utf8_lossy(val_bytes).trim_ascii().to_string();
+                if let Ok(id) = val_str.parse::<i64>() {
+                    exec_id = id;
+                }
+                break;
+            }
+            search_start = colon_pos + 1;
+        } else {
+            break;
+        }
+    }
+
+    (exectime, rowcount, exec_id)
+}
+
+/// 在 indicator 字节中查找分割点（body 结束、indicators 开始的位置）。
 ///
-/// 对每个关键字只取最右命中（即从右向左扫描的第一次命中），等价于原 FinderRev::rfind 语义。
-/// 返回三个关键字最右命中中，起始位置最小（最左）的那个。
-/// 若无任何命中则返回 `window.len()`（表示无分割点）。
-///
-/// 关键字长度：EXECTIME = 8，ROWCOUNT = 8，EXEC_ID = 7。
-fn scan_earliest_indicator(window: &[u8]) -> usize {
-    // 分别记录三个关键字的最右命中起始位置（None 表示未命中）
+/// 返回 body 的字节长度。
+pub(crate) fn find_indicators_split(data: &[u8]) -> usize {
+    let len = data.len();
+
+    // 快速早退：末尾不是 '.' 或 ')' 则无指标。
+    let last_meaningful = data
+        .iter()
+        .rev()
+        .find(|&&b| b != b'\n' && b != b'\r')
+        .copied();
+    if last_meaningful != Some(b'.') && last_meaningful != Some(b')') {
+        return len;
+    }
+
+    // 在末尾 256 字节窗口内反向扫描 ':' 找指标关键字。
+    let window_start = len.saturating_sub(256);
+    let window = &data[window_start..];
+
     let mut exectime_pos: Option<usize> = None;
     let mut rowcount_pos: Option<usize> = None;
     let mut exec_id_pos: Option<usize> = None;
-
     let mut search_end = window.len();
     while search_end > 0 {
-        // 所有关键字均已找到最右命中，无需继续向左
         if exectime_pos.is_some() && rowcount_pos.is_some() && exec_id_pos.is_some() {
             break;
         }
         match memrchr(b':', &window[..search_end]) {
             None => break,
             Some(colon) => {
-                let prefix = &window[..colon];
-                if exectime_pos.is_none() && prefix.ends_with(b"EXECTIME") {
+                if exectime_pos.is_none() && colon >= 8 && &window[colon - 8..colon] == b"EXECTIME" {
                     exectime_pos = Some(colon - 8);
-                } else if rowcount_pos.is_none() && prefix.ends_with(b"ROWCOUNT") {
+                } else if rowcount_pos.is_none() && colon >= 8 && &window[colon - 8..colon] == b"ROWCOUNT" {
                     rowcount_pos = Some(colon - 8);
-                } else if exec_id_pos.is_none() && prefix.ends_with(b"EXEC_ID") {
+                } else if exec_id_pos.is_none() && colon >= 7 && &window[colon - 7..colon] == b"EXEC_ID" {
                     exec_id_pos = Some(colon - 7);
                 }
                 search_end = colon;
@@ -321,198 +264,21 @@ fn scan_earliest_indicator(window: &[u8]) -> usize {
         }
     }
 
-    // 取三者中最左（最小索引）的命中，无命中则返回 window.len()
-    [exectime_pos, rowcount_pos, exec_id_pos]
+    let earliest = [exectime_pos, rowcount_pos, exec_id_pos]
         .into_iter()
         .flatten()
-        .min()
-        .unwrap_or(window.len())
-}
-
-/// Decode a sub-slice of `content_raw` bytes into a `Cow<'a, str>`.
-///
-/// # Safety
-/// `bytes` must be a sub-slice of a `'a`-lived allocation (i.e., the original
-/// `Cow::Borrowed(&'a [u8])`). The caller guarantees this by passing `is_borrowed = true`
-/// only when the source `Cow` is `Borrowed`.
-#[inline]
-unsafe fn decode_content_bytes<'a>(
-    bytes: &[u8],
-    is_borrowed: bool,
-    encoding: FileEncodingHint,
-) -> Cow<'a, str> {
-    match encoding {
-        FileEncodingHint::Utf8 => {
-            // File was already validated as UTF-8 during `from_path`; skip per-slice re-validation.
-            if is_borrowed {
-                unsafe {
-                    Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                        bytes.as_ptr(),
-                        bytes.len(),
-                    )))
-                }
+        .min();
+    match earliest {
+        Some(pos) => {
+            let split = window_start + pos;
+            // 验证守卫：假阳性时返回全文
+            let (_exectime, _rowcount, exec_id) = parse_indicators_from_bytes(&data[split..]);
+            if exec_id != 0 || _exectime != 0.0 || _rowcount != 0 {
+                split
             } else {
-                unsafe { Cow::Owned(std::str::from_utf8_unchecked(bytes).to_string()) }
+                len
             }
         }
-        FileEncodingHint::Auto => match simd_from_utf8(bytes) {
-            Ok(_) => {
-                if is_borrowed {
-                    unsafe {
-                        Cow::Borrowed(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                            bytes.as_ptr(),
-                            bytes.len(),
-                        )))
-                    }
-                } else {
-                    unsafe { Cow::Owned(std::str::from_utf8_unchecked(bytes).to_string()) }
-                }
-            }
-            Err(_) => Cow::Owned(String::from_utf8_lossy(bytes).into_owned()),
-        },
-        FileEncodingHint::Gb18030 => match GB18030.decode(bytes, DecoderTrap::Strict) {
-            Ok(s) => Cow::Owned(s),
-            Err(_) => Cow::Owned(String::from_utf8_lossy(bytes).into_owned()),
-        },
+        None => len,
     }
-}
-
-/// Parse `EXECTIME`, `ROWCOUNT`, `EXEC_ID` from a raw indicators byte slice.
-/// The `sql` field of the returned struct is left as the default empty string.
-/// Returns `None` if none of the three fields are present.
-fn parse_indicators_from_bytes(ind: &[u8]) -> Option<PerformanceMetrics<'static>> {
-    if ind.is_empty() {
-        return None;
-    }
-
-    let mut out = PerformanceMetrics::default();
-    let mut found = false;
-
-    if let Some(idx) = FINDER_EXECTIME.find(ind) {
-        let ss = idx + 9;
-        if let Some(pi) = memchr(b'(', &ind[ss..]) {
-            let val = ind[ss..ss + pi].trim_ascii();
-            if let Ok(t) = fast_float::parse::<f32, _>(val) {
-                out.exectime = t;
-                found = true;
-            }
-        }
-    }
-
-    if let Some(idx) = FINDER_ROWCOUNT.find(ind) {
-        let ss = idx + 9;
-        if let Some(pi) = memchr(b'(', &ind[ss..])
-            && let Some(c) = atoi::<u32>(ind[ss..ss + pi].trim_ascii())
-        {
-            out.rowcount = c;
-            found = true;
-        }
-    }
-
-    if let Some(idx) = FINDER_EXEC_ID.find(ind) {
-        let ss = idx + 8;
-        let end = memchr(b'.', &ind[ss..])
-            .map(|i| ss + i)
-            .unwrap_or(ind.len());
-        if let Some(id) = atoi::<i64>(ind[ss..end].trim_ascii()) {
-            out.exec_id = id;
-            found = true;
-        }
-    }
-
-    found.then_some(out)
-}
-
-/// Strip a leading `": "` prefix from a `Cow<str>` (zero-alloc for both paths).
-#[inline]
-fn strip_ora_prefix(s: Cow<'_, str>) -> Cow<'_, str> {
-    match s {
-        Cow::Borrowed(inner) => Cow::Borrowed(inner.strip_prefix(": ").unwrap_or(inner)),
-        Cow::Owned(mut inner) => {
-            if inner.starts_with(": ") {
-                inner.drain(..2);
-            }
-            Cow::Owned(inner)
-        }
-    }
-}
-
-// ── Public types ──────────────────────────────────────────────────────────────
-
-/// 元数据部分
-///
-/// 包含日志记录的所有元数据字段，如会话 ID、用户名等。
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct MetaParts<'a> {
-    /// EP（Execution Point）编号，范围 0-255
-    pub ep: u8,
-
-    /// 会话 ID
-    pub sess_id: Cow<'a, str>,
-
-    /// 线程 ID
-    pub thrd_id: Cow<'a, str>,
-
-    /// 用户名
-    pub username: Cow<'a, str>,
-
-    /// 事务 ID
-    pub trxid: Cow<'a, str>,
-
-    /// 语句 ID
-    pub statement: Cow<'a, str>,
-
-    /// 应用程序名称
-    pub appname: Cow<'a, str>,
-
-    /// 客户端 IP 地址（可选）
-    pub client_ip: Cow<'a, str>,
-}
-
-/// SQL 记录的性能指标和 SQL 语句
-///
-/// 包含 SQL 执行的性能指标，如执行时间、影响行数、执行 ID 和完整的 SQL 语句。
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct PerformanceMetrics<'a> {
-    /// 执行时间（毫秒）
-    pub exectime: f32,
-
-    /// 影响的行数
-    pub rowcount: u32,
-
-    /// 执行 ID
-    pub exec_id: i64,
-
-    /// 完整的 SQL 语句
-    pub sql: Cow<'a, str>,
-}
-
-/// 从 `Sqllog` 映射到自定义类型的 trait。
-///
-/// 类似标准库的 `From` trait，但专用于 `Sqllog` → 目标类型的转换。
-/// 用户实现此 trait 后，可通过 `.map(MyType::from_sqllog)` 在迭代器链中组合使用。
-///
-/// # Example
-/// ```rust
-/// use dm_database_parser_sqllog::{FromSqllog, Sqllog};
-///
-/// struct MyRecord {
-///     timestamp: String,
-///     sql: String,
-/// }
-///
-/// impl FromSqllog for MyRecord {
-///     fn from_sqllog(s: Sqllog<'_>) -> Self {
-///         MyRecord {
-///             timestamp: s.ts.to_string(),
-///             sql: s.body().to_string(),
-///         }
-///     }
-/// }
-/// ```
-pub trait FromSqllog {
-    /// 从 `Sqllog` 消费方式创建 `Self`。
-    ///
-    /// `sqllog` 按值传入；实现者可以获得字段所有权。
-    fn from_sqllog(s: Sqllog<'_>) -> Self;
 }
