@@ -1,186 +1,144 @@
 use memchr::memmem::Finder;
 use memchr::{memchr, memrchr};
-#[cfg(unix)]
-use memmap2::Advice;
-use memmap2::Mmap;
-use simdutf8::basic::from_utf8 as simd_from_utf8;
-use std::borrow::Cow;
-use std::fs::File;
+use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
+use std::str;
 use std::sync::LazyLock;
 
 use crate::error::ParseError;
+use crate::sqllog;
 use crate::sqllog::Sqllog;
 use encoding::all::GB18030;
 use encoding::{DecoderTrap, Encoding};
 
 /// Pre-built SIMD searcher for the `") "` meta-close pattern.
-/// Avoids rebuilding the Finder on every record parse.
 static FINDER_CLOSE_META: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b") "));
 
 /// Pre-built SIMD searcher for the `"\n20"` record-start pattern.
-/// Shared across threads via LazyLock; constructed once on first use.
 static FINDER_RECORD_START: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"\n20"));
 
+/// 文件编码提示，用于指示日志文件的字符编码。
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
-pub(crate) enum FileEncodingHint {
+pub enum FileEncodingHint {
+    /// 自动探测编码（默认行为）
     #[default]
     Auto,
+    /// 文件使用 UTF-8 编码
     Utf8,
+    /// 文件使用 GB18030 编码
     Gb18030,
 }
 
+/// SQL 日志文件解析器。
+///
+/// 通过 [`LogParserBuilder`] 构建实例。内部将整个文件读入内存，
+/// 自动检测文件编码（UTF-8 或 GB18030）。
 pub struct LogParser {
-    mmap: Mmap,
+    data: Vec<u8>,
     encoding: FileEncodingHint,
 }
 
-/// 记录起始字节偏移列表，由 `LogParser::index()` 一次性构建。
-/// 每个元素是某条记录在内存映射缓冲区内的绝对字节偏移。
-/// 用于两阶段并行扫描：先建索引，再按记录数均匀分区给多线程。
-pub struct RecordIndex {
-    pub(crate) offsets: Vec<usize>,
+/// 配置并构建 [`LogParser`] 的构建器模式 API。
+pub struct LogParserBuilder {
+    path: PathBuf,
+    encoding_hint: Option<FileEncodingHint>,
 }
 
-impl RecordIndex {
-    /// 记录总数
-    pub fn len(&self) -> usize {
-        self.offsets.len()
+impl LogParserBuilder {
+    /// 创建一个新的 `LogParserBuilder`。
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+        Self {
+            path: path.as_ref().to_path_buf(),
+            encoding_hint: None,
+        }
     }
 
-    /// 是否为空（文件不含任何完整记录）
-    pub fn is_empty(&self) -> bool {
-        self.offsets.is_empty()
+    /// 设置文件编码提示。
+    pub fn encoding_hint(mut self, hint: FileEncodingHint) -> Self {
+        self.encoding_hint = Some(hint);
+        self
+    }
+
+    /// 构建并返回 [`LogParser`] 实例。
+    pub fn build(self) -> Result<LogParser, ParseError> {
+        let data = fs::read(&self.path)
+            .map_err(|e| ParseError::IoError(e.to_string()))?;
+
+        let encoding = match self.encoding_hint {
+            Some(hint) => hint,
+            None => {
+                // 自动编码探测：采样头部 64KB 和尾部 4KB
+                let head_size = data.len().min(64 * 1024);
+                let head_ok = str::from_utf8(&data[..head_size]).is_ok();
+                let tail_start = data.len().saturating_sub(4 * 1024).max(head_size);
+                let tail_ok = tail_start >= data.len()
+                    || str::from_utf8(&data[tail_start..]).is_ok();
+                if head_ok && tail_ok {
+                    FileEncodingHint::Utf8
+                } else {
+                    FileEncodingHint::Gb18030
+                }
+            }
+        };
+
+        Ok(LogParser { data, encoding })
     }
 }
 
 impl LogParser {
-    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ParseError> {
-        let file = File::open(path).map_err(|e| ParseError::IoError(e.to_string()))?;
-        let mmap = unsafe { Mmap::map(&file).map_err(|e| ParseError::IoError(e.to_string()))? };
-
-        // HOT-04: 告知 OS 以顺序模式预读 mmap 页面，减少 page fault 开销
-        // Unix-only；Windows 上 advise() 方法不存在，cfg 门控跳过
-        // 失败（如内核不支持）静默忽略，不影响正确性
-        #[cfg(unix)]
-        let _ = mmap.advise(Advice::Sequential);
-
-        // Detect encoding by sampling the first 64 KB and the last 4 KB.
-        // Sampling both ends catches the rare case where GB18030 content only
-        // appears after the initial UTF-8 section (e.g. late-joined non-ASCII
-        // usernames), while keeping the cost well below a full-file scan.
-        //
-        // Known limitation: the middle of large files (> ~68 KB) is not sampled.
-        // GB18030 multi-byte sequences that appear only in the middle of a very
-        // large log file may cause the file to be misclassified as UTF-8, leading
-        // to garbled output for those records. In practice DM log files either use
-        // GB18030 throughout or are entirely ASCII-safe UTF-8, so this edge case
-        // is unlikely. A full middle-window sample could be added if misclassification
-        // is observed in production.
-        let head_size = mmap.len().min(64 * 1024);
-        let tail_start = mmap.len().saturating_sub(4 * 1024).max(head_size);
-        let head_ok = simd_from_utf8(&mmap[..head_size]).is_ok();
-        let tail_ok = tail_start >= mmap.len() || simd_from_utf8(&mmap[tail_start..]).is_ok();
-        let encoding = if head_ok && tail_ok {
-            FileEncodingHint::Utf8
-        } else {
-            FileEncodingHint::Gb18030
-        };
-
-        Ok(Self { mmap, encoding })
-    }
-
+    /// 返回顺序迭代器。
     pub fn iter(&self) -> LogIterator<'_> {
         LogIterator {
-            data: &self.mmap,
+            data: &self.data,
             pos: 0,
             encoding: self.encoding,
+            line_number: 1,
         }
-    }
-
-    /// 两阶段扫描第一阶段：构建记录起始字节偏移索引。
-    /// 单线程扫描整个文件，返回的 `RecordIndex` 可直接用于并行处理阶段。
-    pub fn index(&self) -> RecordIndex {
-        let data: &[u8] = &self.mmap;
-        let mut offsets: Vec<usize> = Vec::new();
-
-        // 第 0 条记录：仅当文件首字节即是时间戳时才单独 push
-        // （find_next_record_start 会先跳过首行，所以首行就是时间戳的情况需要单独处理）
-        if data.len() >= 23 && is_timestamp_start(&data[0..23]) {
-            offsets.push(0);
-        }
-
-        let mut pos: usize = 0;
-        loop {
-            let next = find_next_record_start(data, pos);
-            if next >= data.len() {
-                break;
-            }
-            // 防止与首条记录重复 push（首字节即是时间戳的边界情况）
-            if offsets.last() != Some(&next) {
-                offsets.push(next);
-            }
-            // Pitfall 1: pos 必须前进至少 1，否则 find_next_record_start
-            // 在首行就是时间戳时会返回同一个 next，无限循环
-            pos = next.saturating_add(1);
-        }
-        RecordIndex { offsets }
-    }
-
-    /// Returns a Rayon parallel iterator over all log records.
-    ///
-    /// Large files (≥ PAR_THRESHOLD = 32 MB) are split into N byte-aligned chunks
-    /// at record boundaries — O(threads) overhead, not O(records). Small files use a
-    /// single partition so Rayon executes single-threaded without scheduling cost
-    /// (PAR-03 semantics). `index()` is intentionally not called here: a full
-    /// sequential pre-scan would double I/O on mmap'd, I/O-bound workloads.
-    pub fn par_iter(
-        &self,
-    ) -> impl rayon::iter::ParallelIterator<Item = Result<Sqllog<'_>, ParseError>> + '_ {
-        use rayon::prelude::*;
-
-        const PAR_THRESHOLD: usize = 32 * 1024 * 1024;
-
-        let data: &[u8] = &self.mmap;
-        let encoding = self.encoding;
-
-        let bounds: Vec<(usize, usize)> = if data.is_empty() {
-            Vec::new()
-        } else if data.len() < PAR_THRESHOLD {
-            vec![(0, data.len())]
-        } else {
-            let num_threads = rayon::current_num_threads().max(1);
-            let chunk_size = (data.len() / num_threads).max(1);
-            let mut starts: Vec<usize> = vec![0];
-            for i in 1..num_threads {
-                let boundary = find_next_record_start(data, i * chunk_size);
-                if boundary < data.len() {
-                    starts.push(boundary);
-                }
-            }
-            starts.push(data.len());
-            starts.dedup();
-            starts.windows(2).map(|w| (w[0], w[1])).collect()
-        };
-
-        bounds
-            .into_par_iter()
-            .flat_map_iter(move |(start, end)| LogIterator {
-                data: &data[start..end],
-                pos: 0,
-                encoding,
-            })
     }
 }
 
+/// SQL 日志记录的顺序迭代器。
 pub struct LogIterator<'a> {
     data: &'a [u8],
     pos: usize,
     encoding: FileEncodingHint,
+    line_number: u64,
+}
+
+impl<'a> LogIterator<'a> {
+    /// 返回一个跳过解析错误的迭代器。
+    pub fn skip_errors(self) -> impl Iterator<Item = Sqllog> + 'a {
+        self.filter_map(Result::ok)
+    }
+
+    /// 过滤出执行时间大于等于 `min_ms` 毫秒的记录。
+    pub fn filter_by_exec_time(
+        self,
+        min_ms: u64,
+    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
+        let threshold = min_ms as f32;
+        self.filter(move |item| match item {
+            Ok(sqllog) => sqllog.exectime >= threshold,
+            Err(_) => false,
+        })
+    }
+
+    /// 过滤出 SQL 语句体包含指定 `pattern` 的记录。
+    pub fn filter_by_sql_contains(
+        self,
+        pattern: &str,
+    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
+        let pattern = pattern.to_string();
+        self.filter(move |item| match item {
+            Ok(sqllog) => sqllog.sql.contains(&pattern),
+            Err(_) => false,
+        })
+    }
 }
 
 impl<'a> Iterator for LogIterator<'a> {
-    type Item = Result<Sqllog<'a>, ParseError>;
+    type Item = Result<Sqllog, ParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -189,21 +147,18 @@ impl<'a> Iterator for LogIterator<'a> {
             }
 
             let data = &self.data[self.pos..];
+            let current_line = self.line_number;
 
-            // 快速路径：先用 memchr 找第一个 '\n'，若下一行即是时间戳则为单行记录
-            // 慢速路径（多行）：用 FINDER_RECORD_START.find_iter 跳过嵌入换行
-            let (record_end, next_start, is_multiline) = match memchr(b'\n', data) {
-                None => (data.len(), data.len(), false),
+            let (record_end, next_start) = match memchr(b'\n', data) {
+                None => (data.len(), data.len()),
                 Some(first_nl) => {
                     let ts_start = first_nl + 1;
                     if ts_start + 23 <= data.len()
                         && is_timestamp_start(&data[ts_start..ts_start + 23])
                     {
-                        // 单行记录：边界就是第一个 '\n'
-                        (first_nl, ts_start, false)
+                        (first_nl, ts_start)
                     } else {
                         // 多行记录：用 memmem 跳过嵌入换行继续搜索
-                        // ALGO-01: find_iter 替代逐行 while-memchr 循环
                         let mut found_boundary: Option<usize> = None;
                         for candidate in FINDER_RECORD_START.find_iter(&data[ts_start..]) {
                             let abs_ts = ts_start + candidate + 1;
@@ -215,8 +170,8 @@ impl<'a> Iterator for LogIterator<'a> {
                             }
                         }
                         match found_boundary {
-                            Some(idx) => (idx, idx + 1, true),
-                            None => (data.len(), data.len(), true),
+                            Some(idx) => (idx, idx + 1),
+                            None => (data.len(), data.len()),
                         }
                     }
                 }
@@ -225,82 +180,60 @@ impl<'a> Iterator for LogIterator<'a> {
             let record_slice = &data[..record_end];
             self.pos += next_start;
 
-            // Trim trailing CR if present
+            self.line_number += data[..next_start].iter().filter(|&&b| b == b'\n').count() as u64;
+
+            // Trim trailing CR
             let record_slice = if record_slice.ends_with(b"\r") {
                 &record_slice[..record_slice.len() - 1]
             } else {
                 record_slice
             };
 
-            // Skip empty slices iteratively instead of recursing to avoid stack overflow
-            // when the file contains many consecutive blank lines.
             if record_slice.is_empty() {
                 continue;
             }
 
             return Some(parse_record_with_hint(
                 record_slice,
-                is_multiline,
                 self.encoding,
+                current_line,
             ));
         }
     }
 }
 
-/// Find the position of the next record start at or after `from`.
-/// A record start is a line beginning with a timestamp pattern.
-fn find_next_record_start(data: &[u8], from: usize) -> usize {
-    let mut pos = from;
-    // Skip to start of next line
-    if let Some(nl) = memchr(b'\n', &data[pos..]) {
-        pos += nl + 1;
-    } else {
-        return data.len();
-    }
-    // 先检查 pos 本身是否是时间戳行（Finder 不会命中无前置 '\n' 的行首）
-    if pos + 23 <= data.len() && is_timestamp_start(&data[pos..pos + 23]) {
-        return pos;
-    }
-
-    // ALGO-01: memmem 单次扫描替代逐行 memchr loop
-    for candidate in FINDER_RECORD_START.find_iter(&data[pos..]) {
-        let ts_start = pos + candidate + 1;
-        if ts_start + 23 <= data.len() && is_timestamp_start(&data[ts_start..ts_start + 23]) {
-            return ts_start;
-        }
-    }
-    data.len()
+/// 从原始字节解析单条 SQL 日志记录。
+///
+/// 自动检测多行模式。适合已从文件中读出完整记录的调用方。
+pub fn parse_record(record_bytes: &[u8]) -> Result<Sqllog, ParseError> {
+    parse_record_with_hint(record_bytes, FileEncodingHint::Auto, 0)
 }
 
-pub fn parse_record<'a>(record_bytes: &'a [u8]) -> Result<Sqllog<'a>, ParseError> {
-    // Auto-detect multiline: inspect whether the bytes actually contain a newline
-    // rather than hardcoding true, which caused a redundant memchr scan for
-    // single-line records and was semantically misleading.
-    let is_multiline = memchr(b'\n', record_bytes).is_some();
-    parse_record_with_hint(record_bytes, is_multiline, FileEncodingHint::Auto)
-}
-
-fn parse_record_with_hint<'a>(
-    record_bytes: &'a [u8],
-    is_multiline: bool,
+/// 核心解析函数：从原始字节一次性解析全部字段到 Sqllog。
+fn parse_record_with_hint(
+    record_bytes: &[u8],
     encoding_hint: FileEncodingHint,
-) -> Result<Sqllog<'a>, ParseError> {
-    // Find end of first line
-    let (first_line, _rest) = if is_multiline {
+    line_number: u64,
+) -> Result<Sqllog, ParseError> {
+    // 检测是否多行
+    let is_multiline = memchr(b'\n', record_bytes).is_some();
+
+    // 找到第一行
+    let first_line = if is_multiline {
         match memchr(b'\n', record_bytes) {
             Some(idx) => {
                 let mut line = &record_bytes[..idx];
                 if line.ends_with(b"\r") {
                     line = &line[..line.len() - 1];
                 }
-                (line, &record_bytes[idx + 1..])
+                line
             }
             None => {
                 let mut line = record_bytes;
                 if line.ends_with(b"\r") {
                     line = &line[..line.len() - 1];
                 }
-                (line, &[] as &[u8])
+                line
             }
         }
     } else {
@@ -308,29 +241,24 @@ fn parse_record_with_hint<'a>(
         if line.ends_with(b"\r") {
             line = &line[..line.len() - 1];
         }
-        (line, &[] as &[u8])
+        line
     };
 
-    // 1. Timestamp
+    // ── 1. 时间戳 ──
     if first_line.len() < 23 {
-        return Err(make_invalid_format_error(first_line));
+        return Err(make_invalid_format_error(first_line, line_number));
     }
-    // We assume ASCII/UTF-8 for timestamp
-    // SAFETY: We validated the timestamp format in LogIterator::next using is_ts_millis_bytes,
-    // which ensures it contains only digits and separators.
-    let ts = unsafe { Cow::Borrowed(std::str::from_utf8_unchecked(&first_line[0..23])) };
+    let ts = match str::from_utf8(&first_line[0..23]) {
+        Ok(s) => s.to_string(),
+        Err(_) => return Err(make_invalid_format_error(first_line, line_number)),
+    };
 
-    // 2. Meta
-    // Format: TS (META) BODY
-    // Find first '(' after TS
+    // ── 2. 元数据 ──
     let meta_start = match memchr(b'(', &first_line[23..]) {
         Some(idx) => 23 + idx,
-        None => {
-            return Err(make_invalid_format_error(first_line));
-        }
+        None => return Err(make_invalid_format_error(first_line, line_number)),
     };
 
-    // Find closing ')' for meta using pre-built SIMD Finder.
     let meta_end = match FINDER_CLOSE_META.find(&first_line[meta_start..]) {
         Some(idx) => Some(meta_start + idx),
         None => memrchr(b')', &first_line[meta_start..]).map(|idx| meta_start + idx),
@@ -338,45 +266,44 @@ fn parse_record_with_hint<'a>(
 
     let meta_end = match meta_end {
         Some(idx) => idx,
-        None => {
-            return Err(make_invalid_format_error(first_line));
-        }
+        None => return Err(make_invalid_format_error(first_line, line_number)),
     };
 
     let meta_bytes = &first_line[meta_start + 1..meta_end];
-    // Lazy parsing: store raw bytes as a Cow<'a, str>.
-    // For Utf8 / Auto-UTF8 encoding: meta_bytes is a sub-slice of the memory-mapped buffer
-    // (raw UTF-8 bytes) that lives for 'a — borrowing is sound.
-    // For Gb18030 / Auto-GB18030 encoding: GB18030.decode() produces a new owned String, so
-    // meta_raw becomes Cow::Owned; the 'a lifetime is NOT extended to that allocation.
-    let meta_raw = match encoding_hint {
-        FileEncodingHint::Utf8 => {
-            // File already validated as UTF-8 during `from_path`; skip per-slice re-validation.
-            // SAFETY: meta_bytes is a sub-slice of record_bytes which lives for 'a.
-            // No lifetime extension via from_raw_parts needed — meta_bytes already carries 'a.
-            unsafe { Cow::Borrowed(std::str::from_utf8_unchecked(meta_bytes)) }
-        }
-        FileEncodingHint::Gb18030 => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
-            Ok(s) => Cow::Owned(s),
-            Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
-        },
-        FileEncodingHint::Auto => match simd_from_utf8(meta_bytes) {
-            Ok(_) => {
-                // SAFETY: meta_bytes is a sub-slice of record_bytes which lives for 'a;
-                // simd_from_utf8 confirmed it is valid UTF-8.
-                unsafe { Cow::Borrowed(std::str::from_utf8_unchecked(meta_bytes)) }
-            }
-            Err(_) => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
-                Ok(s) => Cow::Owned(s),
-                Err(_) => Cow::Owned(String::from_utf8_lossy(meta_bytes).into_owned()),
-            },
-        },
-    };
 
-    // 3. Body & 4. Indicators
+    // 解析元数据（考虑编码）
+    let (ep, sess_id, thrd_id, username, trxid, statement, appname, client_ip) =
+        match encoding_hint {
+            FileEncodingHint::Utf8 => {
+                sqllog::parse_meta_from_bytes(meta_bytes)
+            }
+            FileEncodingHint::Auto => {
+                // Auto: try UTF-8 first, then GB18030 fallback
+                match str::from_utf8(meta_bytes) {
+                    Ok(_) => sqllog::parse_meta_from_bytes(meta_bytes),
+                    Err(_) => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
+                        Ok(decoded) => sqllog::parse_meta_from_bytes(decoded.as_bytes()),
+                        Err(_) => {
+                            let lossy = String::from_utf8_lossy(meta_bytes).into_owned();
+                            sqllog::parse_meta_from_bytes(lossy.as_bytes())
+                        }
+                    },
+                }
+            }
+            FileEncodingHint::Gb18030 => {
+                match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
+                    Ok(decoded) => sqllog::parse_meta_from_bytes(decoded.as_bytes()),
+                    Err(_) => {
+                        let lossy = String::from_utf8_lossy(meta_bytes).into_owned();
+                        sqllog::parse_meta_from_bytes(lossy.as_bytes())
+                    }
+                }
+            }
+        };
+
+    // ── 3. Body 和 Indicators ──
     let body_start_in_first_line = meta_end + 1;
 
-    // The ") " pattern guarantees one space; skip it directly.
     let content_start = if body_start_in_first_line < first_line.len()
         && first_line[body_start_in_first_line] == b' '
     {
@@ -385,46 +312,35 @@ fn parse_record_with_hint<'a>(
         body_start_in_first_line
     };
 
-    // Extract optional leading tag like [SEL] or [ORA]
-    let mut tag: Option<Cow<'a, str>> = None;
+    // 提取可选的标签 [SEL] / [ORA]
+    let mut tag: Option<String> = None;
     let content_slice = if content_start < record_bytes.len() {
         let mut s = &record_bytes[content_start..];
-        // If it starts with '[', try to find matching ']' and treat inner token as tag
         if !s.is_empty()
             && s[0] == b'['
             && let Some(end_idx) = memchr(b']', s)
             && end_idx >= 1
         {
             let inner = &s[1..end_idx];
-            // Accept token without spaces and reasonable length
             if !inner.contains(&b' ') && inner.len() <= 32 {
                 tag = match encoding_hint {
                     FileEncodingHint::Utf8 => {
-                        // File already validated as UTF-8; skip re-validation.
-                        // SAFETY: inner is a sub-slice of record_bytes which lives for 'a.
-                        // No from_raw_parts needed — inner already carries 'a lifetime.
-                        Some(unsafe { Cow::Borrowed(std::str::from_utf8_unchecked(inner)) })
+                        str::from_utf8(inner).ok().map(|t| t.to_string())
                     }
-                    _ => match simd_from_utf8(inner) {
-                        Ok(_) => Some(unsafe {
-                            // SAFETY: inner is a sub-slice of record_bytes which lives for 'a;
-                            // simd_from_utf8 confirmed it is valid UTF-8.
-                            Cow::Borrowed(std::str::from_utf8_unchecked(inner))
-                        }),
-                        Err(_) => match encoding_hint {
-                            FileEncodingHint::Gb18030 => {
-                                match GB18030.decode(inner, DecoderTrap::Strict) {
-                                    Ok(s) => Some(Cow::Owned(s)),
-                                    Err(_) => Some(Cow::Owned(
-                                        String::from_utf8_lossy(inner).into_owned(),
-                                    )),
-                                }
-                            }
-                            _ => Some(Cow::Owned(String::from_utf8_lossy(inner).into_owned())),
-                        },
-                    },
+                    FileEncodingHint::Auto => {
+                        str::from_utf8(inner).ok().map(|t| t.to_string())
+                            .or_else(|| {
+                                GB18030.decode(inner, DecoderTrap::Strict)
+                                    .ok()
+                            })
+                    }
+                    FileEncodingHint::Gb18030 => {
+                        GB18030.decode(inner, DecoderTrap::Strict)
+                            .ok()
+                            .or_else(|| str::from_utf8(inner).ok().map(|s| s.to_string()))
+                    }
                 };
-                // Move past the closing ']' and any following ASCII whitespace
+                // 跳过 ']' 及后续空白
                 s = &s[end_idx + 1..];
                 let mut skip = 0usize;
                 while skip < s.len() && s[skip].is_ascii_whitespace() {
@@ -438,42 +354,168 @@ fn parse_record_with_hint<'a>(
         &[] as &[u8]
     };
 
-    let content_raw = Cow::Borrowed(content_slice);
+    // 分割 body 和 indicators
+    let split = sqllog::find_indicators_split(content_slice);
+    let body_bytes = &content_slice[..split];
+    let ind_bytes = &content_slice[split..];
+
+    // 解码 body
+    let sql_raw = match encoding_hint {
+        FileEncodingHint::Utf8 => {
+            String::from_utf8_lossy(body_bytes).into_owned()
+        }
+        FileEncodingHint::Auto => {
+            match str::from_utf8(body_bytes) {
+                Ok(s) => s.to_string(),
+                Err(_) => match GB18030.decode(body_bytes, DecoderTrap::Strict) {
+                    Ok(s) => s,
+                    Err(_) => String::from_utf8_lossy(body_bytes).into_owned(),
+                },
+            }
+        }
+        FileEncodingHint::Gb18030 => {
+            match GB18030.decode(body_bytes, DecoderTrap::Strict) {
+                Ok(s) => s,
+                Err(_) => String::from_utf8_lossy(body_bytes).into_owned(),
+            }
+        }
+    };
+
+    // 处理 ORA 前缀
+    let sql = if tag.as_deref() == Some("ORA") {
+        sql_raw.strip_prefix(": ").unwrap_or(&sql_raw).to_string()
+    } else {
+        sql_raw
+    };
+
+    // 解析性能指标
+    let (exectime, rowcount, exec_id) = sqllog::parse_indicators_from_bytes(ind_bytes);
 
     Ok(Sqllog {
         ts,
-        meta_raw,
-        content_raw,
         tag,
-        encoding: encoding_hint,
+        ep,
+        sess_id,
+        thrd_id,
+        username,
+        trxid,
+        statement,
+        appname,
+        client_ip,
+        sql,
+        exectime,
+        rowcount,
+        exec_id,
     })
 }
 
-// u64 掩码常量：验证时间戳格式 "20YY-MM-DD HH:MM:SS.mmm"
-// 字节位置：0('2'), 1('0'), 4('-'), 7('-'), 10(' '), 13(':'), 16(':'), 19('.')
-const LO_MASK: u64 = 0xFF0000FF0000FFFF; // data[0..8]：位置 0,1,4,7
-const LO_EXPECTED: u64 = 0x2D00002D00003032; // LE: '2'=0x32,'0'=0x30,'-'=0x2D,'-'=0x2D
-const HI_MASK: u64 = 0x0000FF0000FF0000; // data[8..16]：位置 10,13（偏移 2,5）
-const HI_EXPECTED: u64 = 0x00003A0000200000; // LE: ' '=0x20,':'=0x3A
+// ── 时间戳验证 ──────────────────────────────────────────────────────────────
+
+const LO_MASK: u64 = 0xFF0000FF0000FFFF;
+const LO_EXPECTED: u64 = 0x2D00002D00003032;
+const HI_MASK: u64 = 0x0000FF0000FF0000;
+const HI_EXPECTED: u64 = 0x00003A0000200000;
 
 /// 检查 bytes[0..23] 是否符合时间戳格式 "20YY-MM-DD HH:MM:SS.mmm"。
-/// 调用前需确保 bytes.len() >= 23（由调用方做长度检查）。
 #[inline(always)]
 fn is_timestamp_start(bytes: &[u8]) -> bool {
     debug_assert!(bytes.len() >= 23);
     let lo = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
     let hi = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
-    // 位置 16(':') 和 19('.') 用两次单字节比较（比第三次 u64 load 更清晰）
     (lo & LO_MASK == LO_EXPECTED)
         && (hi & HI_MASK == HI_EXPECTED)
         && bytes[16] == b':'
         && bytes[19] == b'.'
 }
 
-/// 将原始字节转换为 InvalidFormat 错误（错误路径，标注 cold 避免影响热路径代码布局）
 #[cold]
-fn make_invalid_format_error(raw_bytes: &[u8]) -> ParseError {
+fn make_invalid_format_error(raw_bytes: &[u8], line_number: u64) -> ParseError {
     ParseError::InvalidFormat {
         raw: String::from_utf8_lossy(raw_bytes).to_string(),
+        line_number,
+    }
+}
+
+// ── 测试 ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_timestamp_start_valid() {
+        let ts = b"2025-11-17 16:09:41.123";
+        assert!(is_timestamp_start(ts));
+    }
+
+    #[test]
+    fn test_is_timestamp_start_wrong_year_prefix() {
+        let ts = b"1025-11-17 16:09:41.123";
+        assert!(!is_timestamp_start(ts));
+    }
+
+    #[test]
+    fn test_is_timestamp_start_wrong_month_separator() {
+        let ts = b"2025X11-17 16:09:41.123";
+        assert!(!is_timestamp_start(ts));
+    }
+
+    #[test]
+    fn test_is_timestamp_start_wrong_second_separator() {
+        let ts = b"2025-11-17 16:09X41.123";
+        assert!(!is_timestamp_start(ts));
+    }
+
+    #[test]
+    fn test_is_timestamp_start_wrong_millis_separator() {
+        let ts = b"2025-11-17 16:09:41X123";
+        assert!(!is_timestamp_start(ts));
+    }
+
+    #[test]
+    fn test_is_timestamp_start_exactly_23_bytes() {
+        let ts = b"2025-11-17 16:09:41.123";
+        assert_eq!(ts.len(), 23);
+        assert!(is_timestamp_start(ts));
+    }
+
+    #[test]
+    fn test_is_timestamp_start_trailing_garbage() {
+        let ts = b"2025-11-17 16:09:41.123extra_garbage_here";
+        assert!(is_timestamp_start(ts));
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn test_builder_encoding_hint_utf8() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut tmp = NamedTempFile::new().expect("tmp");
+        write!(
+            tmp,
+            "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:a) SELECT 1"
+        )
+        .unwrap();
+        tmp.as_file().sync_all().unwrap();
+
+        let parser = LogParserBuilder::new(tmp.path())
+            .encoding_hint(FileEncodingHint::Utf8)
+            .build()
+            .expect("build");
+        let record = parser.iter().next().unwrap().unwrap();
+        assert_eq!(record.ts, "2025-11-17 16:09:41.123");
+        assert!(record.sql.contains("SELECT 1"));
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn test_builder_file_not_found() {
+        let result = LogParserBuilder::new("/nonexistent/path.log").build();
+        assert!(result.is_err());
+        match result {
+            Err(ParseError::IoError(_)) => {}
+            _ => panic!("Expected IoError on nonexistent file"),
+        }
     }
 }

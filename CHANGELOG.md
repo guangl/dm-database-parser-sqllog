@@ -2,321 +2,97 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [1.1.0] - 2026-05-21
+
+### Changed (Breaking)
+
+- **Sqllog 扁平化**：`MetaParts` 和 `PerformanceMetrics` 结构体已移除，所有字段直接平铺到 `Sqllog`。
+- **去除惰性解析**：所有字段在解析时一次性填充，不再有延迟方法。`body()`、`parse_meta()`、`parse_indicators()`、`parse_performance_metrics()`、`exec_time()`、`row_count()` 等方法全部移除，改为直接字段访问。
+- **去除生命周期**：`Sqllog<'a>` → `Sqllog`，所有 `Cow<'a, str>` 替换为 `String`。
+- **去除 unsafe**：移除所有 `unsafe` 代码块，全 safe Rust 实现。
+- **去除 mmap**：`LogParser` 改用 `Vec<u8>` 持有文件内容，移除 `memmap2` 依赖。
+- **去除并行迭代**：移除 `par_iter()`、`RecordIndex`、`index()`，移除 `rayon` 依赖。
+- **去除 FromSqllog**：移除 `FromSqllog` trait。
+- **LogParserBuilder 简化**：移除 `threads()` 和 `parallel_threshold()` 方法。
+- **依赖精简**：移除 `memmap2`、`rayon`、`simdutf8`、`fast-float` 依赖。
+
+### Migration
+
+```rust
+// before (v1.0)
+let body = record.body();
+let meta = record.parse_meta();
+let pm = record.parse_performance_metrics();
+let et = record.exec_time()?;
+
+// after (v1.1)
+let body = &record.sql;
+let username = &record.username;
+let exectime = record.exectime;
+let rowcount = record.rowcount;
+```
+
+## [1.0.0] - 2026-05-19
+
+### Added
+
+- **`LogParserBuilder` 链式构建 API**
+- **过滤方法**：`filter_by_exec_time`、`filter_by_sql_contains`
+- **直接字段访问**：`exec_time()`、`row_count()`
+- **`FromSqllog` trait**
+- 独立运行示例
+
+### Changed
+
+- `ParseError` 增强：添加 `line_number` 字段
+- 公开 API rustdoc 全覆盖
 
 ## [0.9.1] - 2026-04-13
 
 ### Changed
-- **热路径性能优化（单线程 -20.5%）**：
-  - `find_indicators_split()` 中的 `memrchr` 循环改为 SIMD `FinderRev`（预构建）。
-  - `decode_content_bytes()`、`parse_record_with_hint()` 的 meta/tag 路径跳过 UTF-8 文件的 `simdutf8` 重复校验。
-  - `parse_indicators_from_bytes()` 中 `str.parse::<f32>()` 改为 `fast-float`。
-  - `[profile.release]` 新增 `lto = "fat"` 与 `codegen-units = 1`。
-- **依赖升级**：`memchr 2.8.0`、`memmap2 0.9.10`、`thiserror 2.0.18`、`tempfile 3.27` 等升级至最新兼容版本。
-- Benchmark 结果：`parse_sqllog_file_5mb` 中位耗时 693 µs → 551 µs（-20.5%）。
-
-### CI
-- 升级 GitHub Actions 至 Node.js 24 原生版本。
-- 修复 benchmark workflow：更正 bench 名称，移除不存在的 bench，启用 Node.js 24。
+- 热路径性能优化（单线程 -20.5%）
+- 依赖升级
 
 ## [0.9.0] - 2026-04-04
 
 ### Changed
-- **最小化公开 API**（**破坏性变更**）：
-  - 所有子模块（`error`、`parser`、`sqllog`、`tools`）改为 `pub(crate)`，不再作为公开模块暴露。
-  - `FileEncodingHint` 改为 `pub(crate)`；`Sqllog.encoding` 字段改为 `pub(crate)`。
-  - `tools` 中的 `is_ts_millis_bytes` / `is_record_start_line` 改为 `pub(crate)`，不再对外可见。
-  - 从 crate 根统一重导出用户所需的全部类型：`LogParser`、`LogIterator`、`parse_record`、`Sqllog`、`MetaParts`、`PerformanceMetrics`、`ParseError`。
-
-### Migration
-将原来通过子模块访问的导入路径改为 crate 根路径：
-
-```rust
-// before
-use dm_database_parser_sqllog::parser::parse_record;
-use dm_database_parser_sqllog::parser::LogParser;
-
-// after
-use dm_database_parser_sqllog::{parse_record, LogParser};
-```
+- 最小化公开 API（破坏性变更）：子模块改为 `pub(crate)`
 
 ## [0.8.0] - 2026-04-04
 
 ### Added
-- **`LogParser::par_iter()`**：基于 rayon 的并行迭代器，自动按 CPU 核心数切分文件边界并行处理，多线程吞吐量 >28 GB/s（~3.3x 单线程提升）。
+- `LogParser::par_iter()` 基于 rayon 的并行迭代器
 
 ### Changed
-- **性能优化（单线程 +33%）**：
-  - `memmem::find` 改为预构建静态 `LazyLock<Finder>`，消除每条记录的 Finder 初始化开销（原占 self-time 9.3%）。
-  - meta 与 tag 的 UTF-8 校验从 `std::str::from_utf8` 改为 `simdutf8`（原占 self-time 27.6%）。
-  - meta 关闭符 `") "` 搜索由 `memchr(b')')` 循环改为 `memmem::Finder`（预构建）。
-  - `strip_ora_prefix` 使用 `drain(..2)` 避免 Owned 路径的重分配。
-  - `rayon` 移至正式依赖。
-- 单线程中位吞吐量：6.7 GB/s → 7.8 GB/s（baseline: 674 µs / 5 MB）；多线程（8 核）中位吞吐量：~28.9 GB/s。
+- 性能优化（单线程 +33%）
 
 ## [0.7.0] - 2026-04-02
 
 ### Added
-- **`parse_performance_metrics()`**：新增 `Sqllog` 方法，一次调用即可获得 `EXECTIME`、`ROWCOUNT`、`EXEC_ID` 和 SQL 语句，组合为 `PerformanceMetrics` 返回。
-- **ORA tag 前缀自动去除**：当 `tag == "ORA"` 时，`parse_performance_metrics()` 会自动去除 SQL 开头的 `": "` 前缀，`Cow::Borrowed` 路径零分配。
-- **`PerformanceMetrics` 导出**：`PerformanceMetrics` 结构体现已从 crate 根公开导出。
-
-### Changed
-- **合并 `IndicatorsParts` 到 `PerformanceMetrics`**（**破坏性变更**）：
-  - 删除 `IndicatorsParts` 结构体。
-  - `parse_indicators()` 返回类型由 `Option<IndicatorsParts>` 改为 `Option<PerformanceMetrics<'static>>`（`sql` 字段为空字符串）。
-  - 字段重命名：`execute_time` → `exectime`，`row_count` → `rowcount`，`execute_id` → `exec_id`。
-- **性能优化**：`parse_performance_metrics()` 内部仅调用一次 `find_indicators_split()`，彻底消除重复扫描，性能与直接调用 `parse_indicators()` + `body()` 持平（~93 ns/条）。
-
-### Refactored
-- 提取 `decode_content_bytes()`：统一 `body()`、`indicators_raw()`、`parse_performance_metrics()` 三处字节解码逻辑，消除重复代码。
-- 提取 `find_keyword_end_backward()`：将 `find_indicators_split()` 中三个结构相同的 `memrchr` 循环合并为一个通用函数。
-- 提取 `parse_indicators_from_bytes()`：`parse_indicators()` 与 `parse_performance_metrics()` 共享同一解析实现。
-- 提取 `strip_ora_prefix()`、`trim_ascii()`：将分散的内联逻辑提升为具名函数。
+- `parse_performance_metrics()` 方法
+- ORA tag 前缀自动去除
+- 合并 `IndicatorsParts` 到 `PerformanceMetrics`
 
 ## [0.6.1] - 2026-01-31
 
 ### Added
-- **文件级编码检测**：通过采样前 64KB 自动识别日志文件的编码（UTF‑8 或 GB18030），并将结果缓存到 `LogParser::encoding`，避免对每条记录进行重复猜测，提升解析稳定性与性能。
-- **提取方括号标签**：新增 `Sqllog.tag: Option<Cow<'a, str>>`，自动提取记录前缀的 `[SEL]`、`[ORA]` 等标签（若无则为 `None`）。
+- 文件级编码检测
+- 提取方括号标签 `[SEL]`/`[ORA]`
 
 ### Fixed
-- 修复 GB18030 编码的 meta 与 body 解码问题，防止中文字段被乱码处理。
-- 修复当 `appname:` 为空且紧随的 token 为 `ip:` / `ip::` / `ip:::` 时字段错位的问题。
-
+- GB18030 编码解码问题
 
 ## [0.6.0] - 2025-12-02
 
 ### Changed
-- **重大性能优化**：重构 `Sqllog` 结构体，实现完全惰性解析。
-  - 引入 `content_raw` 字段存储原始字节，推迟 `body` 和 `indicators` 的分割与解析。
-  - `LogIterator` 引入上下文提示（Context Hinting），大幅减少单行日志的扫描开销。
-  - 解析性能提升至 >400万条/秒（单线程）。
-- **API 变更**：
-  - `Sqllog` 的 `body` 字段变更为 `body()` 方法。
-  - `Sqllog` 的 `indicators_raw` 字段变更为 `indicators_raw()` 方法。
-  - 移除了 `Sqllog` 中的 `body` 和 `indicators_raw` 公共字段。
+- 完全惰性解析重构
+- 性能提升至 >400 万条/秒
 
 ## [0.5.0] - 2025-11-29
 
 ### Changed
-- 初始性能优化版本，引入 `Cow` 实现零拷贝解析。
+- 引入 `Cow` 实现零拷贝解析
 
-## [0.4.3] - 2025-11-26
+## Earlier versions
 
-### Changed
-- 完善所有核心模块的库化文档注释，明确 API 用法和 feature 控制
-- 测试辅助 API 通过 feature `test-helpers` 隐藏，普通用户不可见
-- README 增加 crates.io、docs.rs、CI、feature 说明、examples 目录说明等内容
-- 代码结构进一步规范，所有内部类型和工具均不暴露给普通用户
-
-### Fixed
-- 保证所有 feature、文档、注释与 crates.io 规范一致
-- 修正部分注释和文档遗漏
-
-## [0.4.1] - 2025-11-20
-
-### Changed
-- 升级依赖：rayon 升级到 1.11.0，memchr 升级到 2.7.6，thiserror 升级到 2.0.17
-- 移除可选依赖和特性相关代码（serde、notify），简化 Cargo.toml
-- 修正仓库链接，repository 字段改为实际地址
-- 清理和优化 README 文档，删除不再支持的 API 示例和说明
-- 优化 parser 相关代码结构，去除无用重导出和条件编译
-- 同步依赖锁文件，移除无用依赖
-- 将 `SqllogIterator` 设为 crate 内部实现并从 `api.rs` 中移除，避免将内部实现暴露为公共类型
-
-### Fixed
-- 修复 release.yml 的 CI 触发条件和 secrets 判断语法，兼容 GitHub Actions 标准
-- 修复 CI 只在 Rust 源码和 Cargo 文件变更时触发
-
-## [0.4.0] - 2025-11-13
-
-### Added
-
-- **全面的 Benchmark 测试体系**：新增 5 个 benchmark 文件，覆盖所有核心组件
-  - `benches/api_bench.rs` - API 函数性能测试（3 组测试）
-  - `benches/parse_functions_bench.rs` - 解析函数性能测试（8 组测试，60+ 场景）
-  - `benches/record_bench.rs` - Record 结构性能测试（6 组测试）
-  - `benches/record_parser_bench.rs` - RecordParser 迭代器性能测试（6 组测试）
-  - `benches/tools_bench.rs` - 工具函数性能测试（7 组测试）
-
-- **Benchmark 文档**：
-  - `BENCHMARKS.md` - 完整的 benchmark 文档和最佳实践
-  - `BENCHMARK_QUICK_START.md` - 快速入门指南
-
-- **示例代码**：
-  - `examples/perf_full_test.rs` - 完整解析性能测试
-  - `examples/perf_record_only.rs` - 仅记录识别性能测试
-  - `examples/streaming_parse.rs` - 流式解析示例
-
-### Changed
-
-- **测试结构重组**：将所有测试从 `src/parser/tests.rs` 迁移到 `tests/` 目录
-  - 创建 4 个集成测试文件（`api.rs`, `record.rs`, `record_parser.rs`, `parse_functions.rs`）
-  - 保持单元测试在源码中（`sqllog.rs`, `tools.rs`）
-  - 测试统计：107 个测试（78 集成 + 29 单元）
-
-- **API 变更**：
-  - `parse_records_from_file` 现在返回 `(Vec<Sqllog>, Vec<ParseError>)` 元组
-    - 在 0.4.3 中移除 `parse_records_from_file`，请使用 `iter_records_from_file` 进行流式处理，或通过 `collect()` 将迭代器转换为 Vec
-  - 将部分内部函数暴露为 `pub`（通过 `__test_helpers` 模块供测试使用）
-
-- **文档更新**：
-  - 新增 `TESTS.md` - 详细的测试说明文档
-  - 更新 `README.md` 反映新的测试和 benchmark 结构
-  - 删除 `docs/BENCHMARK_API.md`（整合到新文档中）
-
-### Performance
-
-- 测试覆盖率：94.69%（行覆盖），98.80%（函数覆盖），93.92%（区域覆盖）
-- Benchmark 覆盖：30+ 组测试场景，60+ 个具体测试
-- 核心函数性能：
-  - `parse_record` 单行：~470 ns
-  - `parse_record` 多行：~480 ns
-  - `is_record_start_line` 有效行：~20-45 ns
-  - `is_record_start_line` 无效行：~0.8 ns
-
-## [0.3.0] - 2025-01-24
-
-### Added
-
-- **实时监控功能**：全新的 `realtime` 特性，支持实时监控 SQL 日志文件变化
-  - `RealtimeSqllogParser` - 核心实时监控解析器
-  - `watch()` - 持续监控日志文件，自动捕获新增记录
-  - `watch_for()` - 监控指定时长后自动停止
-  - `from_beginning()` - 从文件开头开始处理所有记录
-  - 自动处理文件轮转、截断等场景
-  - 精确的文件位置跟踪和断点续传支持
-  - 完善的错误处理和恢复机制
-
-- **新增依赖**：
-  - `notify = "8.2"` - 跨平台文件系统监控（可选特性）
-
-- **示例代码**：
-  - `examples/realtime_watch.rs` - 实时监控示例
-
-- **测试覆盖**：
-  - 新增 108 个实时监控专项测试
-  - 测试总数从 130 增加到 268
-  - 实时监控模块代码覆盖率: 91.17% (行覆盖)
-
-### Changed
-
-- 整体代码覆盖率从 98.47% 调整至 94.07%（由于新增大量实时监控代码）
-- 更新项目描述，强调实时监控能力
-- 更新 README.md，新增实时监控使用说明
-- 更新 Cargo.toml 版本至 0.3.0
-
-### Documentation
-
-- 新增 REALTIME_FEATURE.md 详细文档
-- 更新 README.md 安装说明，包含 realtime 特性的启用方式
-- 更新相关链接，添加实时监控特性文档
-
-## [0.2.0]
-
-### Changed
-- **错误信息增强**：所有 `ParseError` 变体现在都包含原始数据用于调试
-  - 从元组变体改为结构体变体（如 `InvalidEpFormat { value, raw }`）
-  - 所有错误消息格式统一为：`错误描述 | raw: 原始数据`
-  - `FileNotFound` 错误现在包含完整的文件路径和系统错误信息
-- **is_record_start_line 优化**：修复字段数量验证逻辑，确保至少 5 个必需字段
-- **测试改进**：更新测试用例以适配新的错误格式和字段验证规则
-
-### Fixed
-- 修复了 `is_record_start_line` 在字段不足时仍可能返回 true 的问题
-- 修复了所有测试用例以匹配新的结构体变体错误格式
-
-## [0.1.3] - 2025-11-09
-
-### Added
-- **测试覆盖率**：达到 98.47% 的代码覆盖率（远超 80% 目标）
-- **API 覆盖率测试**：新增 21 个 API 测试用例 (`tests/api_coverage.rs`)
-  - `for_each_sqllog` 系列函数测试
-  - `parse_*_from_file` 函数测试
-  - `iter_*_from_file` 函数测试
-  - deprecated API 向后兼容性测试
-- **集成测试**：11 个端到端场景测试 (`tests/integration_tests.rs`)
-  - 文件读取迭代器测试
-  - 大文件处理测试（1000+ 条记录）
-  - 并发解析测试（10 线程）
-  - 混合有效/无效行处理
-- **性能回归测试**：7 个性能基准测试 (`tests/performance_regression.rs`)
-  - 1000 条记录 < 100ms
-  - 10000 条迭代 < 1s
-  - 吞吐量 > 10000 条/秒
-- **边界情况测试**：12 个边界条件测试 (`tests/edge_cases.rs`)
-  - 时间戳边界、EP 字段边界
-  - 特殊字符、UTF-8、emoji 支持
-  - 客户端 IP 格式（IPv4/IPv6）
-- **文档**：
-  - `docs/TESTING.md` - 完整的测试文档和指南
-  - `docs/COVERAGE.md` - 详细的覆盖率报告
-  - `docs/BENCHMARK_TOOLS.md` - 性能基准测试说明
-- **CI/CD**：GitHub Actions 工作流
-  - `ci.yml` - 持续集成
-  - `benchmark.yml` - 性能基准测试
-  - `release.yml` - 自动发布
-- **示例代码**：
-  - `examples/iterator_mode.rs` - 迭代器模式使用
-  - `examples/parse_from_file.rs` - 文件解析示例
-  - `examples/stream_processing.rs` - 流式处理示例
-
-### Changed
-- **模块化重构**：将 `parser.rs` (1038+ 行) 拆分为 7 个子模块
-  - `constants.rs` - 常量定义
-  - `record.rs` - Record 结构
-  - `record_parser.rs` - Record 解析器
-  - `sqllog_parser.rs` - Sqllog 解析器
-  - `parse_functions.rs` - 核心解析函数
-  - `api.rs` - 便捷 API
-  - `tests.rs` - 单元测试
-- **API 重命名**（保持向后兼容）：
-  - `records_from_file()` → `iter_records_from_file()`
-  - `sqllogs_from_file()` → `iter_sqllogs_from_file()`
-- **文档改进**：
-  - README.md 添加覆盖率徽章（98.47%）
-  - 更新测试统计（130 个测试用例）
-  - 添加迭代器模式使用指南
-- **性能优化**：
-  - 流式处理避免内存溢出
-  - 迭代器模式提升大文件处理效率
-
-### Deprecated
-- `records_from_file()` - 请使用 `iter_records_from_file()` 代替（自 0.1.3 起）
-- `sqllogs_from_file()` - 请使用 `iter_sqllogs_from_file()` 代替（自 0.1.3 起）
-
-### Fixed
-- 修复文件读取 API 的覆盖率问题（从 26.44% 提升到 96.55%）
-- 完善错误处理测试
-
-### Statistics
-- **测试数量**：130 个（单元测试 79 + 集成测试 11 + 性能回归 7 + 边界情况 12 + API 覆盖 21）
-- **代码覆盖率**：98.47%（行覆盖），99.28%（函数覆盖）
-- **通过率**：100%（130/130）
-- **性能**：吞吐量 > 10000 条/秒
-
-## [0.1.2] - 2025-11-09
-
-### Added
-- 模块化 parser 结构
-- 详细的文档注释和示例
-- 流式处理支持
-
-### Changed
-- 性能优化：单次迭代验证、预分配内存
-- 使用 `once_cell` 替代 lazy_static
-
-## [0.1.1] - Previous Release
-
-### Added
-- 基本的日志解析功能
-- Record 和 Sqllog 数据结构
-- 批量解析 API
-
-## [0.1.0] - Initial Release
-
-### Added
-- 初始版本发布
-- SQL 日志解析器基础功能
+See git history for versions prior to 0.5.0.

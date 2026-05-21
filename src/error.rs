@@ -15,10 +15,12 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum ParseError {
     /// 通用的格式错误
-    #[error("invalid format | raw: {raw}")]
+    #[error("invalid format at line {line_number} | raw: {raw}")]
     InvalidFormat {
         /// 原始输入数据
         raw: String,
+        /// 文件行号
+        line_number: u64,
     },
 
     /// 文件未找到或无法访问
@@ -26,24 +28,6 @@ pub enum ParseError {
     FileNotFound {
         /// 文件路径
         path: String,
-    },
-
-    /// 无效的记录起始行
-    #[error("invalid record start line: line does not match expected format | raw: {raw}")]
-    InvalidRecordStartLine {
-        /// 原始行内容
-        raw: String,
-    },
-
-    /// 整数解析失败
-    #[error("failed to parse {field} as integer: {value} | raw: {raw}")]
-    IntParseError {
-        /// 字段名
-        field: String,
-        /// 字段值
-        value: String,
-        /// 原始内容
-        raw: String,
     },
 
     /// IO 操作错误

@@ -1,11 +1,8 @@
-/// Benchmark comparing iter() vs par_iter() on a synthetic 50MB log file.
-///
-/// Usage: cargo run --example perf_full --release
-use dm_database_parser_sqllog::LogParser;
-use rayon::prelude::*;
+/// Benchmark comparing iter() performance on a synthetic 50MB log file.
+use dm_database_parser_sqllog::LogParserBuilder;
 use std::time::{Duration, Instant};
 
-const TARGET_SIZE: usize = 50 * 1024 * 1024; // 50 MB
+const TARGET_SIZE: usize = 50 * 1024 * 1024;
 const WARMUP_ITERS: usize = 3;
 const BENCH_ITERS: usize = 20;
 
@@ -22,23 +19,9 @@ fn generate_log_data(target_bytes: usize) -> Vec<u8> {
 fn bench_iter(path: &str) -> Vec<Duration> {
     let mut durations = Vec::with_capacity(BENCH_ITERS);
     for _ in 0..BENCH_ITERS {
-        let parser = LogParser::from_path(path).expect("open file");
+        let parser = LogParserBuilder::new(path).build().expect("open file");
         let start = Instant::now();
         let count: usize = parser.iter().filter(|r| r.is_ok()).count();
-        let elapsed = start.elapsed();
-        durations.push(elapsed);
-        // prevent optimizer from eliminating the work
-        std::hint::black_box(count);
-    }
-    durations
-}
-
-fn bench_par_iter(path: &str) -> Vec<Duration> {
-    let mut durations = Vec::with_capacity(BENCH_ITERS);
-    for _ in 0..BENCH_ITERS {
-        let parser = LogParser::from_path(path).expect("open file");
-        let start = Instant::now();
-        let count: usize = parser.par_iter().filter(|r| r.is_ok()).count();
         let elapsed = start.elapsed();
         durations.push(elapsed);
         std::hint::black_box(count);
@@ -84,55 +67,24 @@ fn main() {
         actual_bytes / RECORD_TEMPLATE.len()
     );
 
-    // Write to a temp file
     let tmp = tempfile_path();
     std::fs::write(&tmp, &data).expect("write temp file");
-    drop(data); // free memory before benchmarking
+    drop(data);
 
-    println!("\nWarm-up ({WARMUP_ITERS} iterations each)…");
+    println!("\nWarm-up ({WARMUP_ITERS} iterations)…");
     for _ in 0..WARMUP_ITERS {
-        let parser = LogParser::from_path(&tmp).expect("open");
+        let parser = LogParserBuilder::new(&tmp).build().expect("open");
         std::hint::black_box(parser.iter().count());
     }
-    for _ in 0..WARMUP_ITERS {
-        let parser = LogParser::from_path(&tmp).expect("open");
-        std::hint::black_box(parser.par_iter().count());
-    }
 
-    println!("\nBenchmarking ({BENCH_ITERS} iterations each)…\n");
+    println!("\nBenchmarking ({BENCH_ITERS} iterations)…\n");
 
     let iter_durations = bench_iter(&tmp);
-    let par_durations = bench_par_iter(&tmp);
 
     println!("Results ({actual_bytes} bytes):");
     report("iter()", &iter_durations, actual_bytes);
-    report("par_iter()", &par_durations, actual_bytes);
 
-    // Speedup
-    let iter_median = median_throughput(&iter_durations, actual_bytes);
-    let par_median = median_throughput(&par_durations, actual_bytes);
-    if iter_median > 0.0 {
-        println!(
-            "\npar_iter() speedup over iter(): {:.2}x",
-            par_median / iter_median
-        );
-    }
-
-    // Clean up
     let _ = std::fs::remove_file(&tmp);
-}
-
-fn median_throughput(durations: &[Duration], bytes: usize) -> f64 {
-    let mut throughputs: Vec<f64> = durations
-        .iter()
-        .map(|d| throughput_mb_s(bytes, *d))
-        .collect();
-    throughputs.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    if throughputs.len().is_multiple_of(2) {
-        (throughputs[throughputs.len() / 2 - 1] + throughputs[throughputs.len() / 2]) / 2.0
-    } else {
-        throughputs[throughputs.len() / 2]
-    }
 }
 
 fn tempfile_path() -> String {

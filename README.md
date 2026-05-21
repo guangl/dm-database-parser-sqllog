@@ -3,40 +3,28 @@
 [![Crates.io](https://img.shields.io/crates/v/dm-database-parser-sqllog.svg)](https://crates.io/crates/dm-database-parser-sqllog)
 [![Documentation](https://docs.rs/dm-database-parser-sqllog/badge.svg)](https://docs.rs/dm-database-parser-sqllog)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A5%2090%25-brightgreen.svg)](docs/COVERAGE.md)
 
-一个高性能的达梦数据库 sqllog 日志解析库，提供零分配或低分配的记录切分与解析功能。
-
-## 主要特点
-
-- **零分配解析**：基于时间戳的记录切分，使用流式 API 和 `Cow` 类型避免额外内存分配
-- **完全惰性解析**：仅在需要时解析 SQL 正文和性能指标，大幅提升扫描速度
-- **极致性能**：单线程 ~7.8 GB/s，多线程（rayon）>28 GB/s
-- **轻量级结构**：解析结果使用引用（`&str`），避免不必要的字符串复制
-- **详细的错误信息**：所有解析错误都包含原始数据，便于调试和问题定位
+一个简洁的达梦数据库 SQL 日志解析库。所有字段在解析时一次性填充，直接通过 `Sqllog` 结构体的公开字段访问。
 
 ## 安装
 
-在你的 `Cargo.toml` 中添加依赖：
-
 ```toml
 [dependencies]
-dm-database-parser-sqllog = "0.9.1"
+dm-database-parser-sqllog = "1.1.0"
 ```
 
-### 作为库使用
+## 快速开始
 
-```rust
-use dm_database_parser_sqllog::LogParser;
+### 基础解析
+
+```rust,no_run
+use dm_database_parser_sqllog::LogParserBuilder;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let parser = LogParser::from_path("large_log.sqllog")?;
+    let parser = LogParserBuilder::new("sqllog.txt").build()?;
     for result in parser.iter() {
         match result {
-            Ok(sqllog) => {
-                // 处理每条日志
-                println!("SQL: {}", sqllog.body());
-            }
+            Ok(sqllog) => println!("{} | {} | {}", sqllog.ts, sqllog.username, sqllog.sql),
             Err(e) => eprintln!("解析错误: {}", e),
         }
     }
@@ -44,97 +32,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-更多用法请参考 `examples/` 目录，所有示例均为库用法，无可执行入口。
+### 过滤慢查询
 
-## 构建与测试
+```rust,no_run
+use dm_database_parser_sqllog::LogParserBuilder;
 
-```bash
-# 构建库
-cargo build
-
-# 运行测试
-cargo test
-
-# 生成文档
-cargo doc --open
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let parser = LogParserBuilder::new("sqllog.txt").build()?;
+    for record in parser.iter().filter_by_exec_time(100) {
+        let sqllog = record?;
+        println!("{}ms - {}", sqllog.exectime, sqllog.sql);
+    }
+    Ok(())
+}
 ```
 
-### 覆盖率 ≥ 90%（已在 CI 强制）
+### 批量导出
 
-本仓库使用 `cargo-llvm-cov` 统计并卡住覆盖率下限为 90%。本地运行：
+```rust,no_run
+use dm_database_parser_sqllog::LogParserBuilder;
 
-```powershell
-# 安装 cargo-llvm-cov（一次性）
-cargo install cargo-llvm-cov
-
-# 运行并在达不到 90% 时失败
-cargo llvm-cov --workspace --all-features --fail-under-lines 90
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let parser = LogParserBuilder::new("sqllog.txt").build()?;
+    let records: Vec<_> = parser.iter().filter_map(|r| r.ok()).collect();
+    for sqllog in &records {
+        println!("{} | {} | {} | {}ms",
+            sqllog.ts, sqllog.username, sqllog.sql, sqllog.exectime);
+    }
+    Ok(())
+}
 ```
 
-### 基准作为性能基线（已在 CI 强制）
+## 主要特点
 
-我们将 Criterion 基准的当前结果作为“性能基线”。任何改动不得慢于该基线（容忍度默认 0%）。
+- **简洁直接**：所有字段在 `Sqllog` 上直接访问，无需调用方法解析
+- **零 unsafe**：全 safe Rust 实现
+- **GB18030 自动检测**：自动识别文件编码（UTF-8 或 GB18030）
+- **过滤方法**：`filter_by_exec_time` / `filter_by_sql_contains` 链式过滤
+- **错误处理**：`ParseError` 包含行号和原始数据，便于调试
 
-首次或更新基线（会运行基准并写入 `benchmarks/baseline.json`）：
+## Sqllog 字段
 
-```powershell
-pwsh ./scripts/export_criterion_baseline.ps1
+```rust
+pub struct Sqllog {
+    pub ts: String,             // 时间戳
+    pub tag: Option<String>,    // 标签 [SEL]/[ORA]
+    pub ep: u8,                 // EP 编号
+    pub sess_id: String,        // 会话 ID
+    pub thrd_id: String,        // 线程 ID
+    pub username: String,       // 用户名
+    pub trxid: String,          // 事务 ID
+    pub statement: String,      // 语句 ID
+    pub appname: String,        // 应用名称
+    pub client_ip: String,      // 客户端 IP
+    pub sql: String,            // SQL 语句体
+    pub exectime: f32,          // 执行时间 (ms)
+    pub rowcount: u32,          // 影响行数
+    pub exec_id: i64,           // 执行 ID
+}
 ```
 
-对比当前实现与基线（慢于基线将退出码 1）：
+## API 概览
 
-```powershell
-pwsh ./scripts/check_criterion_against_baseline.ps1 -Baseline 'benchmarks/baseline.json' -TolerancePercent 0
-```
+- `LogParserBuilder::new(path).encoding_hint(hint).build()` — 构建解析器
+- `parser.iter()` — 顺序迭代，返回 `Result<Sqllog, ParseError>`
+- `.skip_errors()` / `.filter_by_exec_time(ms)` / `.filter_by_sql_contains(pattern)` — 链式过滤
+- `parse_record(&[u8])` — 独立解析函数
 
-CI 中已在 Windows 上执行上述校验以避免环境差异导致波动。
-
-## API 文档
-
-完整的 API 文档请查看 [docs.rs](https://docs.rs/dm-database-parser-sqllog)。
-
-### 文件解析 API（推荐）
-
-- [`LogParser`] - 从文件流式读取 SQL 日志，返回一个迭代器（内存映射 + 零拷贝）
-
-### 核心类型
-
-- [`Sqllog`] - SQL 日志结构体（包含时间戳、元数据、SQL 正文等）
-- [`MetaParts`] - 元数据字段（`ep`、`sess_id`、`username`、`trxid` 等）
-- [`PerformanceMetrics`] - 性能指标与 SQL 语句（`exectime`、`rowcount`、`exec_id`、`sql`）
-- [`ParseError`] - 解析错误类型（包含详细错误信息）
-
-## 设计与注意事项
-
-- 所有 API 都直接返回解析好的 `Sqllog`，无需手动调用解析方法
-- 采用内存映射 (mmap) 技术，适合处理大型日志文件（1GB 文件 < 1 秒）
-- 流式 API 内存占用低，适合超大文件或需要提前中断的场景
-- `body()` 和 `indicators_raw()` 方法采用惰性求值，仅在调用时进行分割和 UTF-8 转换
-- `parse_performance_metrics()` 一次调用获取全部指标与 SQL，内部仅扫描一次尾部窗口（~93 ns/条）；当 tag 为 `ORA` 时自动去除 SQL 开头的 `": "` 前缀
-
-## 测试
-
-本项目包含了全面的测试套件:
-
-- **集成测试**: `tests/` 目录下的集成测试覆盖了常见场景
-- **Benchmark 测试**: 使用 Criterion.rs 进行性能基准测试，确保高性能
-- **100% 通过率**: 所有测试当前状态均为通过
-
-### 测试结构
-
-**集成测试** (`tests/` 目录):
-- `integration_test.rs` - 核心功能集成测试
-
-**Benchmark 测试** (`benches/` 目录):
-- `parser_benchmark.rs` - 解析器性能测试
+完整文档见 [docs.rs/dm-database-parser-sqllog](https://docs.rs/dm-database-parser-sqllog)。
 
 ## 许可证
 
-MIT License - 详见 [LICENSE](LICENSE) 文件
-
-
-## 相关链接
-
-- [Crates.io](https://crates.io/crates/dm-database-parser-sqllog)
-- [文档](https://docs.rs/dm-database-parser-sqllog)
-- [GitHub](https://github.com/guangl/dm-parser-sqllog)
+MIT License — 详见 [LICENSE](LICENSE) 文件
