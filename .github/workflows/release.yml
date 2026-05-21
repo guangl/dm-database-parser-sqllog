@@ -3,7 +3,12 @@ name: Release to crates.io
 on:
   push:
     tags:
-      - "v*" # 匹配所有以 v 开头的 tag，如 v0.1.1
+      - "v*"
+
+# 同一 tag 只允许一个 run，避免竞态
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,36 +17,29 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0 # 需要完整的 git 历史
+          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
 
-      - name: Install cargo-edit (for cargo set-version)
-        run: |
-          cargo install cargo-edit --locked
+      - name: Install cargo-edit
+        run: cargo install cargo-edit --locked
 
       - name: Extract version from tag
         id: tag_version
         run: |
-          # 从 tag 中提取版本号（去掉 v 前缀）
-          # 例如: refs/tags/v0.1.1 -> 0.1.1
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Extracted version: $VERSION"
 
-          # 验证版本号格式 (x.y.z)
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
             echo "Error: Invalid version format: $VERSION"
-            echo "Expected format: x.y.z or x.y.z-suffix"
             exit 1
           fi
 
@@ -49,56 +47,18 @@ jobs:
         run: |
           VERSION="${{ steps.tag_version.outputs.version }}"
           cargo set-version $VERSION
-          echo "Updated Cargo.toml version to $VERSION"
-          echo "Current version in Cargo.toml:"
-          grep "^version" Cargo.toml
+          echo "Cargo.toml version set to $VERSION"
 
       - name: Run tests
-        run: |
-          cargo test --all-features
-
-      - name: Check formatting
-        run: |
-          cargo fmt --all -- --check || echo "Formatting check failed, but continuing..."
-        continue-on-error: true
+        run: cargo test --all-features
 
       - name: Run clippy
-        run: |
-          cargo clippy --all-features -- -D warnings
+        run: cargo clippy --all-features -- -D warnings
 
-      - name: Build package
-        run: |
-          cargo build --release
-
-      - name: Configure git
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-
-      - name: Commit version update
-        run: |
-          git add Cargo.toml Cargo.lock
-          # 检查是否有更改
-          if git diff --staged --quiet; then
-            echo "No changes to commit, version already matches tag"
-          else
-            # 提交版本更新
-            git commit -m "chore: bump version to ${{ steps.tag_version.outputs.version }}"
-
-            # 删除旧 tag（本地）
-            git tag -d ${{ github.ref_name }} || true
-
-            # 创建新 tag 指向更新后的 commit
-            git tag ${{ github.ref_name }}
-
-            # 推送 tag（会覆盖远程的 tag）
-            git push origin ${{ github.ref_name }} --force
-
-            echo "Version updated and tag pushed successfully"
-          fi
+      - name: Build release
+        run: cargo build --release
 
       - name: Publish to crates.io
         run: |
-          cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          # --allow-dirty: Cargo.toml is modified by set-version above
+          cargo publish --allow-dirty --token ${{ secrets.CRATES_IO_TOKEN }}
