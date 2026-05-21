@@ -5,7 +5,6 @@ on:
     tags:
       - "v*"
 
-# 同一 tag 只允许一个 run，避免竞态
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -28,26 +27,29 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Install cargo-edit
-        run: cargo install cargo-edit --locked
-
       - name: Extract version from tag
         id: tag_version
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Extracted version: $VERSION"
+          echo "Tag version: $VERSION"
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
             echo "Error: Invalid version format: $VERSION"
             exit 1
           fi
 
-      - name: Update Cargo.toml version
+      - name: Verify Cargo.toml version matches tag
         run: |
-          VERSION="${{ steps.tag_version.outputs.version }}"
-          cargo set-version $VERSION
-          echo "Cargo.toml version set to $VERSION"
+          TAG_VERSION="${{ steps.tag_version.outputs.version }}"
+          CARGO_VERSION=$(grep '^version' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "Cargo.toml version: $CARGO_VERSION"
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "Error: tag version ($TAG_VERSION) != Cargo.toml version ($CARGO_VERSION)"
+            echo "Run: cargo set-version $TAG_VERSION && git add Cargo.toml && git commit -m 'release: $TAG_VERSION' && git tag v$TAG_VERSION"
+            exit 1
+          fi
+          echo "Version match OK"
 
       - name: Run tests
         run: cargo test --all-features
@@ -59,6 +61,4 @@ jobs:
         run: cargo build --release
 
       - name: Publish to crates.io
-        run: |
-          # --allow-dirty: Cargo.toml is modified by set-version above
-          cargo publish --allow-dirty --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
