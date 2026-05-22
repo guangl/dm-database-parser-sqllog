@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 
 use crate::error::ParseError;
 use crate::filter::adapter;
+use crate::filter::builder::Filter;
 use crate::parser::encoding::FileEncodingHint;
 use crate::record::Sqllog;
 
@@ -57,6 +58,22 @@ impl<'a> LogIterator<'a> {
         pattern: &'a str,
     ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
         adapter::filter_by_sql_contains(self, pattern)
+    }
+
+    /// 应用 FilterBuilder 产出的组合过滤器，错误记录被丢弃（与 filter_by_exec_time 一致）。
+    pub fn apply_filter(
+        self,
+        filter: Filter,
+    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
+        adapter::apply_filter(self, filter)
+    }
+
+    /// 应用 FilterBuilder 产出的组合过滤器，错误记录透传。
+    pub fn apply_filter_keep_errors(
+        self,
+        filter: Filter,
+    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
+        adapter::apply_filter_keep_errors(self, filter)
     }
 }
 
