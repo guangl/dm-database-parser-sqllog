@@ -5,16 +5,19 @@
 
 use crate::record::Sqllog;
 
+/// 装箱的谓词函数类型，满足 Send + Sync 以支持跨线程传递（Phase 12 async 准备）。
+type Predicate = Box<dyn Fn(&Sqllog) -> bool + Send + Sync>;
+
 /// 组合过滤器，持有所有谓词的 AND 组合。
 ///
 /// 通过 [`FilterBuilder`] 构建，不能直接实例化。
 /// 对记录调用 [`matches`](Filter::matches) 时，所有谓词均须通过（AND 短路求值）。
-// allow until Plan 11-02 wires in lib.rs exports
-#[allow(dead_code)]
+#[allow(dead_code)] // allow until Plan 11-02 wires in lib.rs exports
 pub struct Filter {
-    predicates: Vec<Box<dyn Fn(&Sqllog) -> bool + Send + Sync>>,
+    predicates: Vec<Predicate>,
 }
 
+#[allow(dead_code)] // allow until Plan 11-02 wires in lib.rs exports
 impl Filter {
     /// 对给定记录运行所有谓词，全部通过返回 `true`（AND 语义，短路求值）。
     #[inline]
@@ -38,12 +41,12 @@ impl Filter {
 ///     .sql_contains("SELECT")
 ///     .build();
 /// ```
-// allow until Plan 11-02 wires in lib.rs exports
-#[allow(dead_code)]
+#[allow(dead_code)] // allow until Plan 11-02 wires in lib.rs exports
 pub struct FilterBuilder {
-    predicates: Vec<Box<dyn Fn(&Sqllog) -> bool + Send + Sync>>,
+    predicates: Vec<Predicate>,
 }
 
+#[allow(dead_code)] // allow until Plan 11-02 wires in lib.rs exports
 impl FilterBuilder {
     /// 创建一个空的 `FilterBuilder`（无任何谓词）。
     pub fn new() -> Self {
