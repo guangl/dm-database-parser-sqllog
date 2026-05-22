@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Refactor, Filter & Async
 status: ready
-last_updated: "2026-05-22T10:39:07.464Z"
+last_updated: "2026-05-22T11:45:26.464Z"
 progress:
   total_phases: 3
-  completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
-  percent: 33
+  completed_phases: 2
+  total_plans: 5
+  completed_plans: 5
+  percent: 67
 ---
 
 # STATE: dm-database-parser-sqllog 性能优化
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-22)
 
 **Core value:** 在任意硬件上达到尽可能高的解析吞吐量（records/sec 和 GB/s），同时提供符合 Rust 生态习惯的易用 API。
-**Current focus:** Phase 10 — restructure
+**Current focus:** Phase 11 — filterbuilder
 
 ---
 
 ## Current Position
 
-Phase: 10 (restructure) — EXECUTING
-Plan: 2 of 3
+Phase: 11 (filterbuilder) — EXECUTING
+Plan: 1 of 2
 
 ```
 Milestone : v2.0 Refactor, Filter & Async
