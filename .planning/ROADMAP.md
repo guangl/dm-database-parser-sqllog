@@ -50,13 +50,27 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 **Requirements**: REFACTOR-01, REFACTOR-02, REFACTOR-03, REFACTOR-04, REFACTOR-05, REFACTOR-06, REFACTOR-07
 
 **Success Criteria** (what must be TRUE):
+
   1. `src/parser/` 子模块包含 LogParser、LogParserBuilder、LogIterator 等所有解析相关代码；`src/filter/` 子模块包含所有过滤相关骨架；`src/async_api/` 子模块存在（即使暂为空模块）；`src/record.rs` 包含 Sqllog，`src/error.rs` 包含 ParseError
   2. `use dm_database_parser_sqllog::LogParser` / `LogParserBuilder` / `Sqllog` / `ParseError` 等所有原有公开导入路径在用户侧仍然有效（通过 lib.rs 重导出验证）
   3. `tools.rs` 中的字节级工具函数已并入对应子模块，不出现在公开 API（`cargo doc --open` 中不可见）
   4. `cargo test` 全量通过，`cargo clippy -- -D warnings` 零警告，覆盖率 ≥90%
   5. `examples/` 目录和 lib.rs 顶层 rustdoc 示例已更新，`cargo test --doc` 全部通过
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 10-01-PLAN.md — 建立 filter/、async_api/、parser/ 子目录骨架，git mv sqllog.rs → record.rs，最小可编译路径替换
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 10-02-PLAN.md — 拆分 src/parser.rs 为 mod.rs/builder.rs/iterator.rs/encoding.rs，迁移 parse_record 依赖测试到内部 #[cfg(test)] 块，LogIterator 委托调用 filter::adapter
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 10-03-PLAN.md — lib.rs 进入最终态（声明 filter 子模块、移除 parse_record 重导出），验证 examples/、rustdoc、clippy、覆盖率 ≥90%
 
 ---
 
@@ -69,6 +83,7 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 **Requirements**: FILTER-01, FILTER-02, FILTER-03, FILTER-04, FILTER-05, FILTER-06, FILTER-07, FILTER-08, FILTER-09, FILTER-10
 
 **Success Criteria** (what must be TRUE):
+
   1. 用户可以通过 `FilterBuilder::new().ts_contains("2024").exec_time_gt(1.0).build()` 等链式调用构造组合过滤器，所有 14 个字段均有对应过滤方法
   2. 字符串字段（ts、tag 值、sess_id、thrd_id、username、trxid、statement、appname、client_ip、sql）各自支持 contains / eq / starts_with / ends_with 四种谓词；`tag` 还支持存在性检查（`tag_is_some()`）
   3. 数值字段（ep: u8、exectime: f32、rowcount: u32、exec_id: i64）各自支持适合类型的 eq / gt / lt / between 谓词
@@ -88,13 +103,12 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 **Requirements**: ASYNC-01, ASYNC-02, ASYNC-03, ASYNC-04
 
 **Success Criteria** (what must be TRUE):
+
   1. 用户可在 `async fn` 中调用 `parse_file_async(path).await` 得到日志记录集合，无需手动调用 `spawn_blocking`
   2. 内部实现通过 `tokio::task::spawn_blocking` 封装同步 mmap 解析，日志记录以 `Vec<Sqllog<'static>>` 形式返回（owned，生命周期独立）
   3. `Cargo.toml` 中 tokio 仅在 `features = ["async"]` 时引入；不声明该 feature 的项目 `cargo build` 后不引入 tokio 依赖树
   4. async API 接受 `FilterBuilder` 参数，用户可传入过滤条件，结果已在 `spawn_blocking` 内部完成过滤
   5. `cargo test --features async` 全量通过，覆盖率 ≥90%（含 async 代码路径）
-
-**Plans**: TBD
 
 ---
 
@@ -111,9 +125,9 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 | 7. APIErgonomics | v1.1 | 3/3 | Complete | 2026-05-19 |
 | 8. Documentation | v1.1 | 3/3 | Complete | 2026-05-19 |
 | 9. Publishing | v1.1 | 1/1 | Complete | 2026-05-19 |
-| 10. Restructure | v2.0 | 0/? | Not started | - |
+| 10. Restructure | v2.0 | 0/3 | Planned | - |
 | 11. FilterBuilder | v2.0 | 0/? | Not started | - |
 | 12. AsyncAPI | v2.0 | 0/? | Not started | - |
 
 ---
-*Updated: 2026-05-22 — v2.0 roadmap created*
+*Updated: 2026-05-22 — Phase 10 planned (3 plans, sequential waves)*
