@@ -12,12 +12,10 @@ type Predicate = Box<dyn Fn(&Sqllog) -> bool + Send + Sync>;
 ///
 /// 通过 [`FilterBuilder`] 构建，不能直接实例化。
 /// 对记录调用 [`matches`](Filter::matches) 时，所有谓词均须通过（AND 短路求值）。
-#[allow(dead_code)] // allow until Plan 11-02 wires in lib.rs exports
 pub struct Filter {
     predicates: Vec<Predicate>,
 }
 
-#[allow(dead_code)] // allow until Plan 11-02 wires in lib.rs exports
 impl Filter {
     /// 对给定记录运行所有谓词，全部通过返回 `true`（AND 语义，短路求值）。
     #[inline]
@@ -32,7 +30,7 @@ impl Filter {
 ///
 /// # 示例
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use dm_database_parser_sqllog::FilterBuilder;
 ///
 /// let filter = FilterBuilder::new()
@@ -41,12 +39,10 @@ impl Filter {
 ///     .sql_contains("SELECT")
 ///     .build();
 /// ```
-#[allow(dead_code)] // allow until Plan 11-02 wires in lib.rs exports
 pub struct FilterBuilder {
     predicates: Vec<Predicate>,
 }
 
-#[allow(dead_code)] // allow until Plan 11-02 wires in lib.rs exports
 impl FilterBuilder {
     /// 创建一个空的 `FilterBuilder`（无任何谓词）。
     pub fn new() -> Self {
