@@ -1,31 +1,6 @@
-use dm_database_parser_sqllog::{LogParserBuilder, parse_record};
+use dm_database_parser_sqllog::LogParserBuilder;
 use std::io::Write;
 use tempfile::NamedTempFile;
-
-#[test]
-fn meta_closing_paren_without_space_then_body_on_next_line() {
-    let content = b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:app)\nSELECT * FROM T\nEXECTIME: 0(ms) ROWCOUNT: 1(rows) EXEC_ID: 7.\n";
-    let rec = parse_record(content).expect("parse ok");
-    assert!(rec.sql.trim_start().starts_with("SELECT * FROM T"));
-    assert_eq!(rec.exec_id, 7);
-}
-
-#[test]
-fn appname_empty_then_take_next_token_as_appname_not_ip() {
-    let raw = b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname: [SEL] ip:::ffff:10.0.0.1) X";
-    let rec = parse_record(raw).unwrap();
-    assert_eq!(rec.appname, "[SEL]");
-    assert_eq!(rec.client_ip, "::ffff:10.0.0.1");
-}
-
-#[test]
-fn indicators_not_strictly_formatted_should_not_split_body() {
-    let raw = b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:app) SELECT 1; EXEC_ID:123";
-    let rec = parse_record(raw).unwrap();
-    // EXEC_ID:123 无点号结尾，不会被识别为指标，整段作为 SQL body
-    assert_eq!(rec.exec_id, 0);
-    assert!(rec.sql.ends_with("EXEC_ID:123"));
-}
 
 #[test]
 #[cfg(not(miri))]

@@ -295,4 +295,507 @@ mod tests {
             _ => panic!("Expected IoError on nonexistent file"),
         }
     }
+
+    // ── 从 tests/performance_metrics.rs 迁入 ──────────────────────────────
+
+    fn build_perf_record(tag_and_body: &str, tail: &str) -> Vec<u8> {
+        let header =
+            b"2025-11-17 16:09:41.123 (EP[1] sess:123 thrd:456 user:alice trxid:789 stmt:0x1 appname:bench) ";
+        let mut v = Vec::new();
+        v.extend_from_slice(header);
+        v.extend_from_slice(tag_and_body.as_bytes());
+        if !tail.is_empty() {
+            v.extend_from_slice(tail.as_bytes());
+        }
+        v
+    }
+
+    #[test]
+    fn performance_metrics_full() {
+        let raw = build_perf_record(
+            "SELECT * FROM T ",
+            "EXECTIME: 10.5(ms) ROWCOUNT: 100(rows) EXEC_ID: 999.",
+        );
+        let rec = parse_record(&raw).unwrap();
+        assert!((rec.exectime - 10.5).abs() < 1e-6);
+        assert_eq!(rec.rowcount, 100);
+        assert_eq!(rec.exec_id, 999);
+        assert_eq!(rec.sql, "SELECT * FROM T ");
+    }
+
+    #[test]
+    fn performance_metrics_no_indicators() {
+        let raw = build_perf_record("SELECT 1;", "");
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.exectime, 0.0);
+        assert_eq!(rec.rowcount, 0);
+        assert_eq!(rec.exec_id, 0);
+        assert_eq!(rec.sql, "SELECT 1;");
+    }
+
+    #[test]
+    fn performance_metrics_ora_tag_strips_colon_space_prefix() {
+        let raw = build_perf_record(
+            "[ORA] : SELECT 1 FROM DUAL ",
+            "EXECTIME: 5.0(ms) ROWCOUNT: 1(rows) EXEC_ID: 42.",
+        );
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.tag.as_deref(), Some("ORA"));
+        assert_eq!(rec.sql, "SELECT 1 FROM DUAL ");
+        assert!((rec.exectime - 5.0).abs() < 1e-6);
+        assert_eq!(rec.rowcount, 1);
+        assert_eq!(rec.exec_id, 42);
+    }
+
+    #[test]
+    fn performance_metrics_ora_tag_no_prefix_unchanged() {
+        let raw = build_perf_record(
+            "[ORA] SELECT 1 FROM DUAL ",
+            "EXECTIME: 5.0(ms) ROWCOUNT: 1(rows) EXEC_ID: 42.",
+        );
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.tag.as_deref(), Some("ORA"));
+        assert_eq!(rec.sql, "SELECT 1 FROM DUAL ");
+    }
+
+    #[test]
+    fn performance_metrics_non_ora_tag_keeps_prefix_intact() {
+        let raw = build_perf_record("[SEL] : SELECT 1 ", "EXEC_ID: 7.");
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.tag.as_deref(), Some("SEL"));
+        assert_eq!(rec.sql, ": SELECT 1 ");
+    }
+
+    #[test]
+    fn performance_metrics_no_tag_keeps_prefix_intact() {
+        let raw = build_perf_record(": SELECT 1 ", "EXEC_ID: 7.");
+        let rec = parse_record(&raw).unwrap();
+        assert!(rec.tag.is_none());
+        assert_eq!(rec.sql, ": SELECT 1 ");
+    }
+
+    #[test]
+    fn performance_metrics_exectime_only() {
+        let raw = build_perf_record("DELETE FROM T; ", "EXECTIME: 3.5(ms)");
+        let rec = parse_record(&raw).unwrap();
+        assert!((rec.exectime - 3.5).abs() < 1e-6);
+        assert_eq!(rec.rowcount, 0);
+        assert_eq!(rec.exec_id, 0);
+        assert_eq!(rec.sql, "DELETE FROM T; ");
+    }
+
+    #[test]
+    fn performance_metrics_rowcount_only() {
+        let raw = build_perf_record("UPDATE T SET A=1; ", "ROWCOUNT: 10(rows)");
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.exectime, 0.0);
+        assert_eq!(rec.rowcount, 10);
+        assert_eq!(rec.exec_id, 0);
+    }
+
+    #[test]
+    fn performance_metrics_exec_id_only() {
+        let raw = build_perf_record("SELECT 1; ", "EXEC_ID: 42.");
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.exectime, 0.0);
+        assert_eq!(rec.rowcount, 0);
+        assert_eq!(rec.exec_id, 42);
+    }
+
+    #[test]
+    fn performance_metrics_ora_tag_only_colon_space_sql_empty_after_strip() {
+        let raw = build_perf_record("[ORA] : ", "EXEC_ID: 1.");
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.tag.as_deref(), Some("ORA"));
+        assert_eq!(rec.sql, "");
+    }
+
+    #[test]
+    fn early_exit_no_dot_suffix() {
+        let raw = build_perf_record("SELECT * FROM users WHERE id = 1;", "");
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.exectime, 0.0);
+        assert_eq!(rec.rowcount, 0);
+        assert_eq!(rec.exec_id, 0);
+    }
+
+    #[test]
+    fn dot_suffix_no_real_indicators_guarded() {
+        let raw = build_perf_record(
+            "SELECT url FROM t WHERE url = 'http://example.com'.",
+            "",
+        );
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.exec_id, 0);
+        assert_eq!(rec.exectime, 0.0);
+    }
+
+    #[test]
+    fn dot_suffix_with_real_indicators() {
+        let raw = build_perf_record(
+            "SELECT 1 FROM T ",
+            "EXECTIME: 2.5(ms) ROWCOUNT: 5(rows) EXEC_ID: 77.",
+        );
+        let rec = parse_record(&raw).unwrap();
+        assert!((rec.exectime - 2.5).abs() < 1e-6);
+        assert_eq!(rec.rowcount, 5);
+        assert_eq!(rec.exec_id, 77);
+        assert_eq!(rec.sql, "SELECT 1 FROM T ");
+    }
+
+    #[test]
+    fn fake_keyword_in_body_plus_real_indicators() {
+        let raw = build_perf_record(
+            "SELECT 'EXECTIME: fake' FROM T ",
+            "EXECTIME: 1.0(ms) ROWCOUNT: 3(rows) EXEC_ID: 55.",
+        );
+        let rec = parse_record(&raw).unwrap();
+        assert!((rec.exectime - 1.0).abs() < 1e-6);
+        assert_eq!(rec.rowcount, 3);
+        assert_eq!(rec.exec_id, 55);
+        assert!(rec.sql.contains("EXECTIME: fake"));
+    }
+
+    #[test]
+    fn multiple_colons_in_body() {
+        let raw = build_perf_record(
+            "SELECT 'http://example.com:8080/path' FROM T ",
+            "EXECTIME: 3.0(ms) ROWCOUNT: 1(rows) EXEC_ID: 99.",
+        );
+        let rec = parse_record(&raw).unwrap();
+        assert!((rec.exectime - 3.0).abs() < 1e-6);
+        assert_eq!(rec.rowcount, 1);
+        assert_eq!(rec.exec_id, 99);
+        assert!(rec.sql.contains("http://example.com:8080/path"));
+    }
+
+    #[test]
+    fn exec_id_only_split_correct() {
+        let raw = build_perf_record("INSERT INTO T VALUES (1); ", "EXEC_ID: 123.");
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.exec_id, 123);
+        assert_eq!(rec.exectime, 0.0);
+        assert_eq!(rec.rowcount, 0);
+        assert_eq!(rec.sql, "INSERT INTO T VALUES (1); ");
+    }
+
+    // ── 从 tests/sqllog_additional.rs 迁入 ───────────────────────────────
+
+    fn build_additional_record(line1_body: &str, tail: &str) -> Vec<u8> {
+        let header = b"2025-11-17 16:09:41.123 (EP[1] sess:123 thrd:456 user:alice trxid:789 stmt:0x1 appname:bench) ";
+        let mut v = Vec::new();
+        v.extend_from_slice(header);
+        v.extend_from_slice(line1_body.as_bytes());
+        if !tail.is_empty() {
+            v.extend_from_slice(tail.as_bytes());
+        }
+        v
+    }
+
+    #[test]
+    fn body_without_indicators() {
+        let raw = build_additional_record("SELECT 1;", "");
+        let rec = parse_record(&raw).expect("parse ok");
+        assert_eq!(rec.sql, "SELECT 1;");
+        assert_eq!(rec.exec_id, 0);
+        assert_eq!(rec.exectime, 0.0);
+        assert_eq!(rec.rowcount, 0);
+    }
+
+    #[test]
+    fn indicators_exec_id_only() {
+        let raw = build_additional_record("SELECT 1; ", "EXEC_ID: 42.");
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.sql, "SELECT 1; ");
+        assert_eq!(rec.exec_id, 42);
+    }
+
+    #[test]
+    fn indicators_rowcount_only() {
+        let raw = build_additional_record("UPDATE T SET A=1; ", "ROWCOUNT: 10(rows)");
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.sql, "UPDATE T SET A=1; ");
+        assert_eq!(rec.rowcount, 10);
+    }
+
+    #[test]
+    fn indicators_exectime_only() {
+        let raw = build_additional_record("DELETE FROM T; ", "EXECTIME: 3.5(ms)");
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.sql, "DELETE FROM T; ");
+        assert!((rec.exectime - 3.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn indicators_permutation_all() {
+        let tail = "ROWCOUNT: 5(rows) EXECTIME: 12.25(ms) EXEC_ID: 999.";
+        let raw = build_additional_record("SELECT * FROM T ", tail);
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.sql, "SELECT * FROM T ");
+        assert_eq!(rec.rowcount, 5);
+        assert!((rec.exectime - 12.25).abs() < 1e-6);
+        assert_eq!(rec.exec_id, 999);
+    }
+
+    #[test]
+    fn meta_parsing_basic() {
+        let raw = b"2025-11-17 16:09:41.123 (EP[2] sess:0xABC thrd:777 user:SYSDBA trxid:0 stmt:0x2 appname:cli) SELECT";
+        let rec = parse_record(raw).unwrap();
+        assert_eq!(rec.ep, 2);
+        assert_eq!(rec.sess_id, "0xABC");
+        assert_eq!(rec.thrd_id, "777");
+        assert_eq!(rec.username, "SYSDBA");
+        assert_eq!(rec.trxid, "0");
+        assert_eq!(rec.statement, "0x2");
+        assert_eq!(rec.appname, "cli");
+    }
+
+    #[test]
+    fn meta_parsing_empty_appname() {
+        let raw = b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:) X";
+        let rec = parse_record(raw).unwrap();
+        assert_eq!(rec.appname, "");
+    }
+
+    #[test]
+    fn appname_empty_followed_by_ip_colon_single_should_keep_appname_empty() {
+        let raw = b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname: ip:10.1.1.1) X";
+        let rec = parse_record(raw).unwrap();
+        assert_eq!(rec.appname, "");
+        assert_eq!(rec.client_ip, "10.1.1.1");
+    }
+
+    #[test]
+    fn appname_empty_followed_by_ip_triple_colon_should_keep_appname_empty() {
+        let raw = b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname: ip:::ffff:10.3.100.68) X";
+        let rec = parse_record(raw).unwrap();
+        assert_eq!(rec.appname, "");
+        assert_eq!(rec.client_ip, "::ffff:10.3.100.68");
+    }
+
+    #[test]
+    fn meta_parsing_gb18030_username() {
+        use ::encoding::all::GB18030;
+        use ::encoding::{EncoderTrap, Encoding};
+
+        let username = "用户";
+        let user_bytes = GB18030
+            .encode(username, EncoderTrap::Strict)
+            .expect("encode");
+
+        let mut raw: Vec<u8> = b"2025-11-17 16:09:41.123 (EP[2] sess:0xABC thrd:777 user:".to_vec();
+        raw.extend_from_slice(&user_bytes);
+        raw.extend_from_slice(b" trxid:0 stmt:0x2 appname:cli) SELECT");
+
+        let rec = parse_record(&raw).unwrap();
+        assert_eq!(rec.username, username);
+    }
+
+    #[test]
+    fn tag_extraction_and_body_trim() {
+        let raw = b"2025-11-17 16:09:41.123 (EP[1] sess:123 thrd:456 user:u trxid:3 stmt:4 appname:bench) [SEL] SELECT 1; EXEC_ID: 42.";
+        let rec = parse_record(raw).unwrap();
+        assert_eq!(rec.tag.as_deref(), Some("SEL"));
+        assert_eq!(rec.sql, "SELECT 1; ");
+    }
+
+    #[test]
+    #[cfg(not(miri))]
+    fn file_encoding_detection_gb18030() {
+        use ::encoding::all::GB18030;
+        use ::encoding::{EncoderTrap, Encoding};
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let username = "用户";
+        let user_bytes = GB18030
+            .encode(username, EncoderTrap::Strict)
+            .expect("encode");
+
+        let mut line: Vec<u8> = b"2025-11-17 16:09:41.123 (EP[2] sess:0xABC thrd:777 user:".to_vec();
+        line.extend_from_slice(&user_bytes);
+        line.extend_from_slice(b" trxid:0 stmt:0x2 appname:cli) SELECT\n");
+
+        let mut tmp = NamedTempFile::new().expect("tmp");
+        tmp.write_all(&line).expect("write");
+        tmp.as_file().sync_all().expect("sync");
+
+        let parser = LogParserBuilder::new(tmp.path()).build().expect("open");
+        let rec = parser.iter().next().unwrap().unwrap();
+        assert_eq!(rec.username, username);
+    }
+
+    #[test]
+    fn find_indicators_split_exectime_keyword_in_sql_body_no_indicators() {
+        let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) SELECT * FROM t WHERE col = 'EXECTIME: slow'\n";
+        let record = parse_record(raw.as_bytes()).unwrap();
+        assert_eq!(
+            record.sql,
+            "SELECT * FROM t WHERE col = 'EXECTIME: slow'\n"
+        );
+        assert_eq!(record.exec_id, 0);
+        assert_eq!(record.exectime, 0.0);
+    }
+
+    #[test]
+    fn find_indicators_split_rowcount_keyword_in_sql_body_no_indicators() {
+        let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) SELECT * FROM t WHERE cnt = 'ROWCOUNT: many'\n";
+        let record = parse_record(raw.as_bytes()).unwrap();
+        assert_eq!(
+            record.sql,
+            "SELECT * FROM t WHERE cnt = 'ROWCOUNT: many'\n"
+        );
+        assert_eq!(record.rowcount, 0);
+    }
+
+    #[test]
+    fn find_indicators_split_exec_id_keyword_in_sql_body_no_indicators() {
+        let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) SELECT EXEC_ID: foo FROM dual\n";
+        let record = parse_record(raw.as_bytes()).unwrap();
+        assert_eq!(record.sql, "SELECT EXEC_ID: foo FROM dual\n");
+        assert_eq!(record.exec_id, 0);
+    }
+
+    #[test]
+    fn find_indicators_split_keyword_in_body_plus_real_indicators() {
+        let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) SELECT EXECTIME: slow\nEXECTIME: 5.0(ms) ROWCOUNT: 1(rows) EXEC_ID: 99.\n";
+        let record = parse_record(raw.as_bytes()).unwrap();
+        assert!((record.exectime - 5.0).abs() < 1e-6);
+        assert!(record.sql.contains("SELECT"));
+    }
+
+    #[test]
+    fn find_indicators_split_multiple_keywords_in_body_no_indicators() {
+        let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) EXECTIME: x ROWCOUNT: y EXEC_ID: z\n";
+        let record = parse_record(raw.as_bytes()).unwrap();
+        assert_eq!(record.sql, "EXECTIME: x ROWCOUNT: y EXEC_ID: z\n");
+        assert_eq!(record.exec_id, 0);
+        assert_eq!(record.exectime, 0.0);
+    }
+
+    #[test]
+    #[cfg(not(miri))]
+    fn encoding_detection_gb18030_after_64kb_boundary() {
+        use ::encoding::all::GB18030;
+        use ::encoding::{EncoderTrap, Encoding};
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let ascii_record = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:ascii trxid:0 stmt:0 appname:app) SELECT 1;\n";
+        let repeat_count = 65536 / ascii_record.len() + 2;
+
+        let username = "用户";
+        let user_bytes = GB18030.encode(username, EncoderTrap::Strict).unwrap();
+        let mut gb_line: Vec<u8> = b"2025-11-17 16:09:42.000 (EP[0] sess:2 thrd:2 user:".to_vec();
+        gb_line.extend_from_slice(&user_bytes);
+        gb_line.extend_from_slice(b" trxid:0 stmt:0 appname:app) SELECT 2;\n");
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        for _ in 0..repeat_count {
+            tmp.write_all(ascii_record.as_bytes()).unwrap();
+        }
+        tmp.write_all(&gb_line).unwrap();
+        tmp.as_file().sync_all().unwrap();
+
+        let parser = LogParserBuilder::new(tmp.path()).build().unwrap();
+        let records: Vec<_> = parser.iter().collect();
+        let last = records.last().unwrap().as_ref().unwrap();
+        assert_eq!(last.username, username);
+    }
+
+    #[test]
+    #[cfg(not(miri))]
+    fn file_encoding_detection_utf8() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let username = "用户";
+        let user_bytes = username.as_bytes();
+
+        let mut line: Vec<u8> = b"2025-11-17 16:09:41.123 (EP[2] sess:0xABC thrd:777 user:".to_vec();
+        line.extend_from_slice(user_bytes);
+        line.extend_from_slice(b" trxid:0 stmt:0x2 appname:cli) SELECT\n");
+
+        let mut tmp = NamedTempFile::new().expect("tmp");
+        tmp.write_all(&line).expect("write");
+        tmp.as_file().sync_all().expect("sync");
+
+        let parser = LogParserBuilder::new(tmp.path()).build().expect("open");
+        let rec = parser.iter().next().unwrap().unwrap();
+        assert_eq!(rec.username, username);
+    }
+
+    // ── 从 tests/parser_coverage.rs 迁入 ─────────────────────────────────
+
+    /// parse_record with no embedded newline → hits the None branch in is_multiline=true path
+    #[test]
+    fn parse_record_single_line_no_newline() {
+        let raw =
+            b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:U trxid:3 stmt:4 appname:a) SELECT 1";
+        let rec = parse_record(raw).unwrap();
+        assert_eq!(rec.ts, "2025-11-17 16:09:41.123");
+        assert!(rec.sql.contains("SELECT"));
+    }
+
+    /// Record >= 23 bytes with valid timestamp but no `(` → InvalidFormat at meta_start
+    #[test]
+    fn parse_record_no_meta_open_paren() {
+        let raw = b"2025-11-17 16:09:41.123 NO_OPEN_PAREN_AT_ALL_HERE body";
+        let result = parse_record(raw);
+        assert!(result.is_err());
+    }
+
+    /// Record with `(` but no closing `)` → InvalidFormat at meta_end
+    #[test]
+    fn parse_record_no_meta_close_paren() {
+        let raw = b"2025-11-17 16:09:41.123 (UNCLOSED_META body";
+        let result = parse_record(raw);
+        assert!(result.is_err());
+    }
+
+    // ── 从 tests/edge_cases.rs 迁入 ──────────────────────────────────────
+
+    #[test]
+    fn meta_closing_paren_without_space_then_body_on_next_line() {
+        let content = b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:app)\nSELECT * FROM T\nEXECTIME: 0(ms) ROWCOUNT: 1(rows) EXEC_ID: 7.\n";
+        let rec = parse_record(content).expect("parse ok");
+        assert!(rec.sql.trim_start().starts_with("SELECT * FROM T"));
+        assert_eq!(rec.exec_id, 7);
+    }
+
+    #[test]
+    fn appname_empty_then_take_next_token_as_appname_not_ip() {
+        let raw = b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname: [SEL] ip:::ffff:10.0.0.1) X";
+        let rec = parse_record(raw).unwrap();
+        assert_eq!(rec.appname, "[SEL]");
+        assert_eq!(rec.client_ip, "::ffff:10.0.0.1");
+    }
+
+    #[test]
+    fn indicators_not_strictly_formatted_should_not_split_body() {
+        let raw = b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:3 stmt:4 appname:app) SELECT 1; EXEC_ID:123";
+        let rec = parse_record(raw).unwrap();
+        // EXEC_ID:123 无点号结尾，不会被识别为指标，整段作为 SQL body
+        assert_eq!(rec.exec_id, 0);
+        assert!(rec.sql.ends_with("EXEC_ID:123"));
+    }
+
+    // ── 从 tests/parser_errors.rs 迁入 ───────────────────────────────────
+
+    #[test]
+    fn test_parse_record_timestamp_validation() {
+        use crate::error::ParseError;
+
+        let valid = b"2025-11-17 16:09:41.123 (EP[0]) SELECT";
+        let result = parse_record(valid);
+        assert!(result.is_ok());
+
+        let bad_ts_no_meta = b"2025-11-17 16:09:41.123 INVALID NO META";
+        let result = parse_record(bad_ts_no_meta);
+        assert!(matches!(result, Err(ParseError::InvalidFormat { .. })));
+
+        let short = b"2025-11-17 16:0";
+        let result = parse_record(short);
+        assert!(matches!(result, Err(ParseError::InvalidFormat { .. })));
+    }
 }

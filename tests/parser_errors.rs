@@ -159,19 +159,3 @@ fn test_line_number_with_multiline_record() {
     }
 }
 
-#[test]
-fn test_parse_record_timestamp_validation() {
-    use dm_database_parser_sqllog::parse_record;
-
-    let valid = b"2025-11-17 16:09:41.123 (EP[0]) SELECT";
-    let result = parse_record(valid);
-    assert!(result.is_ok());
-
-    let bad_ts_no_meta = b"2025-11-17 16:09:41.123 INVALID NO META";
-    let result = parse_record(bad_ts_no_meta);
-    assert!(matches!(result, Err(ParseError::InvalidFormat { .. })));
-
-    let short = b"2025-11-17 16:0";
-    let result = parse_record(short);
-    assert!(matches!(result, Err(ParseError::InvalidFormat { .. })));
-}
