@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Refactor, Filter & Async
 status: ready
-last_updated: "2026-05-22T00:23:21.224Z"
+last_updated: "2026-05-22T00:37:43.207Z"
 progress:
   total_phases: 3
   completed_phases: 0
@@ -23,11 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-22)
 
 **Core value:** 在任意硬件上达到尽可能高的解析吞吐量（records/sec 和 GB/s），同时提供符合 Rust 生态习惯的易用 API。
-**Current focus:** v2.0 — Phase 10: Restructure
+**Current focus:** Phase 10 — restructure
 
 ---
 
 ## Current Position
+
+Phase: 10 (restructure) — EXECUTING
+Plan: 1 of 3
 
 ```
 Milestone : v2.0 Refactor, Filter & Async
