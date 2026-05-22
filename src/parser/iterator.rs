@@ -45,17 +45,21 @@ impl<'a> LogIterator<'a> {
     }
 
     /// 过滤出执行时间大于等于 `min_ms` 毫秒的记录。
+    ///
+    /// 解析错误在迭代过程中**静默丢弃**。若需保留错误，请使用 [`apply_filter_keep_errors`]。
     pub fn filter_by_exec_time(
         self,
-        min_ms: u64,
+        min_ms: f32,
     ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
         adapter::filter_by_exec_time(self, min_ms)
     }
 
     /// 过滤出 SQL 语句体包含指定 `pattern` 的记录。
+    ///
+    /// 解析错误在迭代过程中**静默丢弃**。若需保留错误，请使用 [`apply_filter_keep_errors`]。
     pub fn filter_by_sql_contains(
         self,
-        pattern: &'a str,
+        pattern: &str,
     ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
         adapter::filter_by_sql_contains(self, pattern)
     }

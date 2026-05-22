@@ -135,7 +135,11 @@ impl FilterBuilder {
     }
 
     /// EP 在闭区间 [min, max] 内（FILTER-03）。
+    ///
+    /// # Panics
+    /// 当 `min > max` 时 panic。
     pub fn ep_between(self, min: u8, max: u8) -> Self {
+        assert!(min <= max, "ep_between: min ({min}) must be <= max ({max})");
         self.add(move |r| r.ep >= min && r.ep <= max)
     }
 
@@ -349,11 +353,19 @@ impl FilterBuilder {
 
     // ── FILTER-06: exectime（f32，不提供 eq）──
 
-    /// 执行时间大于 min_ms 毫秒（FILTER-06）。
+    /// 执行时间大于 min_ms 毫秒（严格不等，FILTER-06）。
     ///
     /// 参数单位为毫秒；f32 精度约 7 位有效数字，不提供 `exec_time_eq` 方法以避免误用。
     pub fn exec_time_gt(self, min_ms: f32) -> Self {
         self.add(move |r| r.exectime > min_ms)
+    }
+
+    /// 执行时间大于等于 min_ms 毫秒（含边界，FILTER-06）。
+    ///
+    /// 与 [`LogIterator::filter_by_exec_time`] 语义一致（`>=`）。
+    /// 参数单位为毫秒；f32 精度约 7 位有效数字。
+    pub fn exec_time_gte(self, min_ms: f32) -> Self {
+        self.add(move |r| r.exectime >= min_ms)
     }
 
     /// 执行时间小于 max_ms 毫秒（FILTER-06）。
@@ -366,7 +378,14 @@ impl FilterBuilder {
     /// 执行时间在闭区间 [min_ms, max_ms] 毫秒内（FILTER-06）。
     ///
     /// 参数单位为毫秒；f32 精度约 7 位有效数字，不提供 `exec_time_eq` 方法以避免误用。
+    ///
+    /// # Panics
+    /// 当 `min_ms > max_ms` 时 panic。
     pub fn exec_time_between(self, min_ms: f32, max_ms: f32) -> Self {
+        assert!(
+            min_ms <= max_ms,
+            "exec_time_between: min_ms ({min_ms}) must be <= max_ms ({max_ms})"
+        );
         self.add(move |r| r.exectime >= min_ms && r.exectime <= max_ms)
     }
 
@@ -388,7 +407,11 @@ impl FilterBuilder {
     }
 
     /// 影响行数在闭区间 [min, max] 内（FILTER-07）。
+    ///
+    /// # Panics
+    /// 当 `min > max` 时 panic。
     pub fn rowcount_between(self, min: u32, max: u32) -> Self {
+        assert!(min <= max, "rowcount_between: min ({min}) must be <= max ({max})");
         self.add(move |r| r.rowcount >= min && r.rowcount <= max)
     }
 
@@ -410,7 +433,11 @@ impl FilterBuilder {
     }
 
     /// 执行 ID 在闭区间 [min, max] 内（FILTER-08）。
+    ///
+    /// # Panics
+    /// 当 `min > max` 时 panic。
     pub fn exec_id_between(self, min: i64, max: i64) -> Self {
+        assert!(min <= max, "exec_id_between: min ({min}) must be <= max ({max})");
         self.add(move |r| r.exec_id >= min && r.exec_id <= max)
     }
 }

@@ -4,24 +4,23 @@ use crate::record::Sqllog;
 
 pub(crate) fn filter_by_exec_time<I>(
     iter: I,
-    min_ms: u64,
+    min_ms: f32,
 ) -> impl Iterator<Item = Result<Sqllog, ParseError>>
 where
     I: Iterator<Item = Result<Sqllog, ParseError>>,
 {
-    let threshold = min_ms as f32;
     iter.filter(move |item| match item {
-        Ok(sqllog) => sqllog.exectime >= threshold,
+        Ok(sqllog) => sqllog.exectime >= min_ms,
         Err(_) => false,
     })
 }
 
-pub(crate) fn filter_by_sql_contains<I>(
+pub(crate) fn filter_by_sql_contains<'a, I>(
     iter: I,
     pattern: &str,
-) -> impl Iterator<Item = Result<Sqllog, ParseError>>
+) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a
 where
-    I: Iterator<Item = Result<Sqllog, ParseError>>,
+    I: Iterator<Item = Result<Sqllog, ParseError>> + 'a,
 {
     let pattern = pattern.to_string();
     iter.filter(move |item| match item {
