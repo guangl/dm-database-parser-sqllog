@@ -3,8 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Refactor, Filter & Async
 status: ready
-last_updated: "2026-05-22T00:00:00.000Z"
-last_activity: 2026-05-22
+last_updated: "2026-05-22T00:04:53.591Z"
 progress:
   total_phases: 3
   completed_phases: 0
