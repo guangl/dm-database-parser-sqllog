@@ -35,7 +35,7 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 
 ### v2.0 Refactor, Filter & Async
 
-- [ ] **Phase 10: Restructure** - 将 src/ 重组为功能分层子模块，保持所有现有测试通过
+- [x] **Phase 10: Restructure** - 将 src/ 重组为功能分层子模块，保持所有现有测试通过 (completed 2026-05-22)
 - [ ] **Phase 11: FilterBuilder** - 实现全字段可组合链式过滤，与 LogParser 迭代器集成
 - [ ] **Phase 12: AsyncAPI** - 引入 tokio async 封装及 feature flag，与 FilterBuilder 集成
 
@@ -62,15 +62,15 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 Plans:
 **Wave 1**
 
-- [ ] 10-01-PLAN.md — 建立 filter/、async_api/、parser/ 子目录骨架，git mv sqllog.rs → record.rs，最小可编译路径替换
+- [x] 10-01-PLAN.md — 建立 filter/、async_api/、parser/ 子目录骨架，git mv sqllog.rs → record.rs，最小可编译路径替换
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 10-02-PLAN.md — 拆分 src/parser.rs 为 mod.rs/builder.rs/iterator.rs/encoding.rs，迁移 parse_record 依赖测试到内部 #[cfg(test)] 块，LogIterator 委托调用 filter::adapter
+- [x] 10-02-PLAN.md — 拆分 src/parser.rs 为 mod.rs/builder.rs/iterator.rs/encoding.rs，迁移 parse_record 依赖测试到内部 #[cfg(test)] 块，LogIterator 委托调用 filter::adapter
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 10-03-PLAN.md — lib.rs 进入最终态（声明 filter 子模块、移除 parse_record 重导出），验证 examples/、rustdoc、clippy、覆盖率 ≥90%
+- [x] 10-03-PLAN.md — lib.rs 进入最终态（声明 filter 子模块、移除 parse_record 重导出），验证 examples/、rustdoc、clippy、覆盖率 ≥90%
 
 ---
 
@@ -125,7 +125,7 @@ Plans:
 | 7. APIErgonomics | v1.1 | 3/3 | Complete | 2026-05-19 |
 | 8. Documentation | v1.1 | 3/3 | Complete | 2026-05-19 |
 | 9. Publishing | v1.1 | 1/1 | Complete | 2026-05-19 |
-| 10. Restructure | v2.0 | 0/3 | Planned | - |
+| 10. Restructure | v2.0 | 3/3 | Complete   | 2026-05-22 |
 | 11. FilterBuilder | v2.0 | 0/? | Not started | - |
 | 12. AsyncAPI | v2.0 | 0/? | Not started | - |
 

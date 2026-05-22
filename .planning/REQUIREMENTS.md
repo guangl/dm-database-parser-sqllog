@@ -12,8 +12,8 @@
 - [ ] **REFACTOR-03**: 开发者可通过 `src/async_api/` 子模块找到所有异步接口代码
 - [ ] **REFACTOR-04**: `src/record.rs` 包含 `Sqllog` 结构体定义，`src/error.rs` 包含 `ParseError`
 - [ ] **REFACTOR-05**: `tools.rs` 中的字节级工具函数分配到合适子模块，不作为公开 API 暴露
-- [ ] **REFACTOR-06**: `lib.rs` 顶层重导出所有公开类型，用户侧 `use dm_database_parser_sqllog::LogParser` 等路径保持有效
-- [ ] **REFACTOR-07**: `examples/` 和 rustdoc 示例更新以反映新模块结构和新 API
+- [x] **REFACTOR-06**: `lib.rs` 顶层重导出所有公开类型，用户侧 `use dm_database_parser_sqllog::LogParser` 等路径保持有效
+- [x] **REFACTOR-07**: `examples/` 和 rustdoc 示例更新以反映新模块结构和新 API
 
 ### Filter（全字段过滤）
 
@@ -66,8 +66,8 @@
 | REFACTOR-03 | Phase 10 | Pending |
 | REFACTOR-04 | Phase 10 | Pending |
 | REFACTOR-05 | Phase 10 | Pending |
-| REFACTOR-06 | Phase 10 | Pending |
-| REFACTOR-07 | Phase 10 | Pending |
+| REFACTOR-06 | Phase 10 | Complete |
+| REFACTOR-07 | Phase 10 | Complete |
 | FILTER-01 | Phase 11 | Pending |
 | FILTER-02 | Phase 11 | Pending |
 | FILTER-03 | Phase 11 | Pending |
