@@ -51,7 +51,7 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 
 **Success Criteria** (what must be TRUE):
 
-  1. `src/parser/` 子模块包含 LogParser、LogParserBuilder、LogIterator 等所有解析相关代码；`src/filter/` 子模块包含所有过滤相关骨架；`src/async_api/` 子模块存在（即使暂为空模块）；`src/record.rs` 包含 Sqllog，`src/error.rs` 包含 ParseError
+  1. `src/parser/` 子模块包含 LogParser、LogParserBuilder、LogIterator 等所有解析相关代码；`src/filter/` 子模块包含所有过滤相关骨架;`src/async_api/` 子模块存在（即使暂为空模块）；`src/record.rs` 包含 Sqllog，`src/error.rs` 包含 ParseError
   2. `use dm_database_parser_sqllog::LogParser` / `LogParserBuilder` / `Sqllog` / `ParseError` 等所有原有公开导入路径在用户侧仍然有效（通过 lib.rs 重导出验证）
   3. `tools.rs` 中的字节级工具函数已并入对应子模块，不出现在公开 API（`cargo doc --open` 中不可见）
   4. `cargo test` 全量通过，`cargo clippy -- -D warnings` 零警告，覆盖率 ≥90%
@@ -90,7 +90,16 @@ Plans:
   4. 多条件链式调用自动以 AND 语义组合，单次迭代遍历完成多条件筛选（无中间 Vec 分配）
   5. `LogParser::iter()` 或 `LogParser::par_iter()` 可直接接受 FilterBuilder 产出的过滤器，`cargo test` 全量通过，覆盖率 ≥90%
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 11-01-PLAN.md — 新建 src/filter/builder.rs，实现 Filter + FilterBuilder + 14 字段全部链式谓词方法（约 50 个公开方法）+ 完整 #[cfg(test)] 单元测试块；更新 src/filter/mod.rs 重导出（FILTER-01~09 类型与方法表面）
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 11-02-PLAN.md — adapter.rs 扩展 apply_filter / apply_filter_keep_errors；iterator.rs 上 LogIterator 暴露对应 pub 方法；lib.rs 顶层 pub use Filter / FilterBuilder；新增 examples/filter_builder.rs 与 tests/filter_builder.rs 集成测试；跑通 cargo test / clippy / cargo llvm-cov ≥90%（FILTER-09/10 集成与端到端验收）
 
 ---
 
@@ -126,8 +135,8 @@ Plans:
 | 8. Documentation | v1.1 | 3/3 | Complete | 2026-05-19 |
 | 9. Publishing | v1.1 | 1/1 | Complete | 2026-05-19 |
 | 10. Restructure | v2.0 | 3/3 | Complete   | 2026-05-22 |
-| 11. FilterBuilder | v2.0 | 0/? | Not started | - |
+| 11. FilterBuilder | v2.0 | 0/2 | Planned | - |
 | 12. AsyncAPI | v2.0 | 0/? | Not started | - |
 
 ---
-*Updated: 2026-05-22 — Phase 10 planned (3 plans, sequential waves)*
+*Updated: 2026-05-22 — Phase 11 planned (2 plans, sequential waves)*
