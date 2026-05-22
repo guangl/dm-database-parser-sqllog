@@ -1,89 +1,32 @@
+pub mod builder;
+pub mod iterator;
+pub(crate) mod encoding;
+
+pub use builder::LogParserBuilder;
+pub use iterator::LogIterator;
+pub use encoding::FileEncodingHint;
+
 use memchr::memmem::Finder;
 use memchr::{memchr, memrchr};
-use std::fs;
-use std::path::Path;
-use std::path::PathBuf;
 use std::str;
 use std::sync::LazyLock;
 
 use crate::error::ParseError;
-use crate::record;
-use crate::record::Sqllog;
-use encoding::all::GB18030;
-use encoding::{DecoderTrap, Encoding};
+use crate::record::{self, Sqllog};
+use ::encoding::all::GB18030;
+use ::encoding::{DecoderTrap, Encoding};
 
 /// Pre-built SIMD searcher for the `") "` meta-close pattern.
-static FINDER_CLOSE_META: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b") "));
-
-/// Pre-built SIMD searcher for the `"\n20"` record-start pattern.
-static FINDER_RECORD_START: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"\n20"));
-
-/// 文件编码提示，用于指示日志文件的字符编码。
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
-pub enum FileEncodingHint {
-    /// 自动探测编码（默认行为）
-    #[default]
-    Auto,
-    /// 文件使用 UTF-8 编码
-    Utf8,
-    /// 文件使用 GB18030 编码
-    Gb18030,
-}
+static FINDER_CLOSE_META: LazyLock<Finder<'static>> =
+    LazyLock::new(|| Finder::new(b") "));
 
 /// SQL 日志文件解析器。
 ///
 /// 通过 [`LogParserBuilder`] 构建实例。内部将整个文件读入内存，
 /// 自动检测文件编码（UTF-8 或 GB18030）。
 pub struct LogParser {
-    data: Vec<u8>,
-    encoding: FileEncodingHint,
-}
-
-/// 配置并构建 [`LogParser`] 的构建器模式 API。
-pub struct LogParserBuilder {
-    path: PathBuf,
-    encoding_hint: Option<FileEncodingHint>,
-}
-
-impl LogParserBuilder {
-    /// 创建一个新的 `LogParserBuilder`。
-    pub fn new<P: AsRef<Path>>(path: P) -> Self {
-        Self {
-            path: path.as_ref().to_path_buf(),
-            encoding_hint: None,
-        }
-    }
-
-    /// 设置文件编码提示。
-    pub fn encoding_hint(mut self, hint: FileEncodingHint) -> Self {
-        self.encoding_hint = Some(hint);
-        self
-    }
-
-    /// 构建并返回 [`LogParser`] 实例。
-    pub fn build(self) -> Result<LogParser, ParseError> {
-        let data = fs::read(&self.path)
-            .map_err(|e| ParseError::IoError(e.to_string()))?;
-
-        let encoding = match self.encoding_hint {
-            Some(hint) => hint,
-            None => {
-                // 自动编码探测：采样头部 64KB 和尾部 4KB
-                let head_size = data.len().min(64 * 1024);
-                let head_ok = str::from_utf8(&data[..head_size]).is_ok();
-                let tail_start = data.len().saturating_sub(4 * 1024).max(head_size);
-                let tail_ok = tail_start >= data.len()
-                    || str::from_utf8(&data[tail_start..]).is_ok();
-                if head_ok && tail_ok {
-                    FileEncodingHint::Utf8
-                } else {
-                    FileEncodingHint::Gb18030
-                }
-            }
-        };
-
-        Ok(LogParser { data, encoding })
-    }
+    pub(super) data: Vec<u8>,
+    pub(super) encoding: FileEncodingHint,
 }
 
 impl LogParser {
@@ -98,119 +41,15 @@ impl LogParser {
     }
 }
 
-/// SQL 日志记录的顺序迭代器。
-pub struct LogIterator<'a> {
-    data: &'a [u8],
-    pos: usize,
-    encoding: FileEncodingHint,
-    line_number: u64,
-}
-
-impl<'a> LogIterator<'a> {
-    /// 返回一个跳过解析错误的迭代器。
-    pub fn skip_errors(self) -> impl Iterator<Item = Sqllog> + 'a {
-        self.filter_map(Result::ok)
-    }
-
-    /// 过滤出执行时间大于等于 `min_ms` 毫秒的记录。
-    pub fn filter_by_exec_time(
-        self,
-        min_ms: u64,
-    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
-        let threshold = min_ms as f32;
-        self.filter(move |item| match item {
-            Ok(sqllog) => sqllog.exectime >= threshold,
-            Err(_) => false,
-        })
-    }
-
-    /// 过滤出 SQL 语句体包含指定 `pattern` 的记录。
-    pub fn filter_by_sql_contains(
-        self,
-        pattern: &str,
-    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
-        let pattern = pattern.to_string();
-        self.filter(move |item| match item {
-            Ok(sqllog) => sqllog.sql.contains(&pattern),
-            Err(_) => false,
-        })
-    }
-}
-
-impl<'a> Iterator for LogIterator<'a> {
-    type Item = Result<Sqllog, ParseError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.pos >= self.data.len() {
-                return None;
-            }
-
-            let data = &self.data[self.pos..];
-            let current_line = self.line_number;
-
-            let (record_end, next_start) = match memchr(b'\n', data) {
-                None => (data.len(), data.len()),
-                Some(first_nl) => {
-                    let ts_start = first_nl + 1;
-                    if ts_start + 23 <= data.len()
-                        && is_timestamp_start(&data[ts_start..ts_start + 23])
-                    {
-                        (first_nl, ts_start)
-                    } else {
-                        // 多行记录：用 memmem 跳过嵌入换行继续搜索
-                        let mut found_boundary: Option<usize> = None;
-                        for candidate in FINDER_RECORD_START.find_iter(&data[ts_start..]) {
-                            let abs_ts = ts_start + candidate + 1;
-                            if abs_ts + 23 <= data.len()
-                                && is_timestamp_start(&data[abs_ts..abs_ts + 23])
-                            {
-                                found_boundary = Some(ts_start + candidate);
-                                break;
-                            }
-                        }
-                        match found_boundary {
-                            Some(idx) => (idx, idx + 1),
-                            None => (data.len(), data.len()),
-                        }
-                    }
-                }
-            };
-
-            let record_slice = &data[..record_end];
-            self.pos += next_start;
-
-            self.line_number += data[..next_start].iter().filter(|&&b| b == b'\n').count() as u64;
-
-            // Trim trailing CR
-            let record_slice = if record_slice.ends_with(b"\r") {
-                &record_slice[..record_slice.len() - 1]
-            } else {
-                record_slice
-            };
-
-            if record_slice.is_empty() {
-                continue;
-            }
-
-            return Some(parse_record_with_hint(
-                record_slice,
-                self.encoding,
-                current_line,
-            ));
-        }
-    }
-}
-
 /// 从原始字节解析单条 SQL 日志记录。
 ///
 /// 自动检测多行模式。适合已从文件中读出完整记录的调用方。
-pub fn parse_record(record_bytes: &[u8]) -> Result<Sqllog, ParseError> {
+pub(crate) fn parse_record(record_bytes: &[u8]) -> Result<Sqllog, ParseError> {
     parse_record_with_hint(record_bytes, FileEncodingHint::Auto, 0)
 }
 
 /// 核心解析函数：从原始字节一次性解析全部字段到 Sqllog。
-fn parse_record_with_hint(
+pub(super) fn parse_record_with_hint(
     record_bytes: &[u8],
     encoding_hint: FileEncodingHint,
     line_number: u64,
@@ -409,25 +248,6 @@ fn parse_record_with_hint(
     })
 }
 
-// ── 时间戳验证 ──────────────────────────────────────────────────────────────
-
-const LO_MASK: u64 = 0xFF0000FF0000FFFF;
-const LO_EXPECTED: u64 = 0x2D00002D00003032;
-const HI_MASK: u64 = 0x0000FF0000FF0000;
-const HI_EXPECTED: u64 = 0x00003A0000200000;
-
-/// 检查 bytes[0..23] 是否符合时间戳格式 "20YY-MM-DD HH:MM:SS.mmm"。
-#[inline(always)]
-fn is_timestamp_start(bytes: &[u8]) -> bool {
-    debug_assert!(bytes.len() >= 23);
-    let lo = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
-    let hi = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
-    (lo & LO_MASK == LO_EXPECTED)
-        && (hi & HI_MASK == HI_EXPECTED)
-        && bytes[16] == b':'
-        && bytes[19] == b'.'
-}
-
 #[cold]
 fn make_invalid_format_error(raw_bytes: &[u8], line_number: u64) -> ParseError {
     ParseError::InvalidFormat {
@@ -441,49 +261,6 @@ fn make_invalid_format_error(raw_bytes: &[u8], line_number: u64) -> ParseError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_is_timestamp_start_valid() {
-        let ts = b"2025-11-17 16:09:41.123";
-        assert!(is_timestamp_start(ts));
-    }
-
-    #[test]
-    fn test_is_timestamp_start_wrong_year_prefix() {
-        let ts = b"1025-11-17 16:09:41.123";
-        assert!(!is_timestamp_start(ts));
-    }
-
-    #[test]
-    fn test_is_timestamp_start_wrong_month_separator() {
-        let ts = b"2025X11-17 16:09:41.123";
-        assert!(!is_timestamp_start(ts));
-    }
-
-    #[test]
-    fn test_is_timestamp_start_wrong_second_separator() {
-        let ts = b"2025-11-17 16:09X41.123";
-        assert!(!is_timestamp_start(ts));
-    }
-
-    #[test]
-    fn test_is_timestamp_start_wrong_millis_separator() {
-        let ts = b"2025-11-17 16:09:41X123";
-        assert!(!is_timestamp_start(ts));
-    }
-
-    #[test]
-    fn test_is_timestamp_start_exactly_23_bytes() {
-        let ts = b"2025-11-17 16:09:41.123";
-        assert_eq!(ts.len(), 23);
-        assert!(is_timestamp_start(ts));
-    }
-
-    #[test]
-    fn test_is_timestamp_start_trailing_garbage() {
-        let ts = b"2025-11-17 16:09:41.123extra_garbage_here";
-        assert!(is_timestamp_start(ts));
-    }
 
     #[cfg(not(miri))]
     #[test]

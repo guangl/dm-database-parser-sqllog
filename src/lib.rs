@@ -80,11 +80,12 @@
 //! ```
 
 pub(crate) mod error;
+pub(crate) mod filter;
 pub(crate) mod parser;
 pub(crate) mod record;
 
 pub use error::ParseError;
 pub use parser::{
-    FileEncodingHint, LogIterator, LogParser, LogParserBuilder, parse_record,
+    FileEncodingHint, LogIterator, LogParser, LogParserBuilder,
 };
 pub use record::Sqllog;
