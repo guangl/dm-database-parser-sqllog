@@ -8,8 +8,7 @@ use crate::parser::encoding::FileEncodingHint;
 use crate::record::Sqllog;
 
 /// Pre-built SIMD searcher for the `"\n20"` record-start pattern.
-static FINDER_RECORD_START: LazyLock<Finder<'static>> =
-    LazyLock::new(|| Finder::new(b"\n20"));
+static FINDER_RECORD_START: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"\n20"));
 
 // ── 时间戳验证常量 ──────────────────────────────────────────────────────────────
 
@@ -104,8 +103,7 @@ impl<'a> Iterator for LogIterator<'a> {
             let record_slice = &data[..record_end];
             self.pos += next_start;
 
-            self.line_number +=
-                data[..next_start].iter().filter(|&&b| b == b'\n').count() as u64;
+            self.line_number += data[..next_start].iter().filter(|&&b| b == b'\n').count() as u64;
 
             // Trim trailing CR
             let record_slice = if record_slice.ends_with(b"\r") {

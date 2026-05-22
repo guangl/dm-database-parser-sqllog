@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::str;
 
 use crate::error::ParseError;
-use crate::parser::encoding::FileEncodingHint;
 use crate::parser::LogParser;
+use crate::parser::encoding::FileEncodingHint;
 
 /// 配置并构建 [`LogParser`] 的构建器模式 API。
 pub struct LogParserBuilder {
@@ -29,8 +29,7 @@ impl LogParserBuilder {
 
     /// 构建并返回 [`LogParser`] 实例。
     pub fn build(self) -> Result<LogParser, ParseError> {
-        let data = fs::read(&self.path)
-            .map_err(|e| ParseError::IoError(e.to_string()))?;
+        let data = fs::read(&self.path).map_err(|e| ParseError::IoError(e.to_string()))?;
 
         let encoding = match self.encoding_hint {
             Some(hint) => hint,
@@ -39,8 +38,8 @@ impl LogParserBuilder {
                 let head_size = data.len().min(64 * 1024);
                 let head_ok = str::from_utf8(&data[..head_size]).is_ok();
                 let tail_start = data.len().saturating_sub(4 * 1024).max(head_size);
-                let tail_ok = tail_start >= data.len()
-                    || str::from_utf8(&data[tail_start..]).is_ok();
+                let tail_ok =
+                    tail_start >= data.len() || str::from_utf8(&data[tail_start..]).is_ok();
                 if head_ok && tail_ok {
                     FileEncodingHint::Utf8
                 } else {

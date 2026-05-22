@@ -158,4 +158,3 @@ fn test_line_number_with_multiline_record() {
         _ => panic!("Expected InvalidFormat, got {err:?}"),
     }
 }
-

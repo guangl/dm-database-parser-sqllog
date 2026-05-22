@@ -1,10 +1,10 @@
 pub mod builder;
-pub mod iterator;
 pub(crate) mod encoding;
+pub mod iterator;
 
 pub use builder::LogParserBuilder;
-pub use iterator::LogIterator;
 pub use encoding::FileEncodingHint;
+pub use iterator::LogIterator;
 
 use memchr::memmem::Finder;
 use memchr::{memchr, memrchr};
@@ -17,8 +17,7 @@ use ::encoding::all::GB18030;
 use ::encoding::{DecoderTrap, Encoding};
 
 /// Pre-built SIMD searcher for the `") "` meta-close pattern.
-static FINDER_CLOSE_META: LazyLock<Finder<'static>> =
-    LazyLock::new(|| Finder::new(b") "));
+static FINDER_CLOSE_META: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b") "));
 
 /// SQL 日志文件解析器。
 ///
@@ -44,6 +43,7 @@ impl LogParser {
 /// 从原始字节解析单条 SQL 日志记录。
 ///
 /// 自动检测多行模式。适合已从文件中读出完整记录的调用方。
+#[cfg(test)]
 pub(crate) fn parse_record(record_bytes: &[u8]) -> Result<Sqllog, ParseError> {
     parse_record_with_hint(record_bytes, FileEncodingHint::Auto, 0)
 }
@@ -111,34 +111,30 @@ pub(super) fn parse_record_with_hint(
     let meta_bytes = &first_line[meta_start + 1..meta_end];
 
     // 解析元数据（考虑编码）
-    let (ep, sess_id, thrd_id, username, trxid, statement, appname, client_ip) =
-        match encoding_hint {
-            FileEncodingHint::Utf8 => {
-                record::parse_meta_from_bytes(meta_bytes)
-            }
-            FileEncodingHint::Auto => {
-                // Auto: try UTF-8 first, then GB18030 fallback
-                match str::from_utf8(meta_bytes) {
-                    Ok(_) => record::parse_meta_from_bytes(meta_bytes),
-                    Err(_) => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
-                        Ok(decoded) => record::parse_meta_from_bytes(decoded.as_bytes()),
-                        Err(_) => {
-                            let lossy = String::from_utf8_lossy(meta_bytes).into_owned();
-                            record::parse_meta_from_bytes(lossy.as_bytes())
-                        }
-                    },
-                }
-            }
-            FileEncodingHint::Gb18030 => {
-                match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
+    let (ep, sess_id, thrd_id, username, trxid, statement, appname, client_ip) = match encoding_hint
+    {
+        FileEncodingHint::Utf8 => record::parse_meta_from_bytes(meta_bytes),
+        FileEncodingHint::Auto => {
+            // Auto: try UTF-8 first, then GB18030 fallback
+            match str::from_utf8(meta_bytes) {
+                Ok(_) => record::parse_meta_from_bytes(meta_bytes),
+                Err(_) => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
                     Ok(decoded) => record::parse_meta_from_bytes(decoded.as_bytes()),
                     Err(_) => {
                         let lossy = String::from_utf8_lossy(meta_bytes).into_owned();
                         record::parse_meta_from_bytes(lossy.as_bytes())
                     }
-                }
+                },
             }
-        };
+        }
+        FileEncodingHint::Gb18030 => match GB18030.decode(meta_bytes, DecoderTrap::Strict) {
+            Ok(decoded) => record::parse_meta_from_bytes(decoded.as_bytes()),
+            Err(_) => {
+                let lossy = String::from_utf8_lossy(meta_bytes).into_owned();
+                record::parse_meta_from_bytes(lossy.as_bytes())
+            }
+        },
+    };
 
     // ── 3. Body 和 Indicators ──
     let body_start_in_first_line = meta_end + 1;
@@ -163,21 +159,15 @@ pub(super) fn parse_record_with_hint(
             let inner = &s[1..end_idx];
             if !inner.contains(&b' ') && inner.len() <= 32 {
                 tag = match encoding_hint {
-                    FileEncodingHint::Utf8 => {
-                        str::from_utf8(inner).ok().map(|t| t.to_string())
-                    }
-                    FileEncodingHint::Auto => {
-                        str::from_utf8(inner).ok().map(|t| t.to_string())
-                            .or_else(|| {
-                                GB18030.decode(inner, DecoderTrap::Strict)
-                                    .ok()
-                            })
-                    }
-                    FileEncodingHint::Gb18030 => {
-                        GB18030.decode(inner, DecoderTrap::Strict)
-                            .ok()
-                            .or_else(|| str::from_utf8(inner).ok().map(|s| s.to_string()))
-                    }
+                    FileEncodingHint::Utf8 => str::from_utf8(inner).ok().map(|t| t.to_string()),
+                    FileEncodingHint::Auto => str::from_utf8(inner)
+                        .ok()
+                        .map(|t| t.to_string())
+                        .or_else(|| GB18030.decode(inner, DecoderTrap::Strict).ok()),
+                    FileEncodingHint::Gb18030 => GB18030
+                        .decode(inner, DecoderTrap::Strict)
+                        .ok()
+                        .or_else(|| str::from_utf8(inner).ok().map(|s| s.to_string())),
                 };
                 // 跳过 ']' 及后续空白
                 s = &s[end_idx + 1..];
@@ -200,24 +190,18 @@ pub(super) fn parse_record_with_hint(
 
     // 解码 body
     let sql_raw = match encoding_hint {
-        FileEncodingHint::Utf8 => {
-            String::from_utf8_lossy(body_bytes).into_owned()
-        }
-        FileEncodingHint::Auto => {
-            match str::from_utf8(body_bytes) {
-                Ok(s) => s.to_string(),
-                Err(_) => match GB18030.decode(body_bytes, DecoderTrap::Strict) {
-                    Ok(s) => s,
-                    Err(_) => String::from_utf8_lossy(body_bytes).into_owned(),
-                },
-            }
-        }
-        FileEncodingHint::Gb18030 => {
-            match GB18030.decode(body_bytes, DecoderTrap::Strict) {
+        FileEncodingHint::Utf8 => String::from_utf8_lossy(body_bytes).into_owned(),
+        FileEncodingHint::Auto => match str::from_utf8(body_bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => match GB18030.decode(body_bytes, DecoderTrap::Strict) {
                 Ok(s) => s,
                 Err(_) => String::from_utf8_lossy(body_bytes).into_owned(),
-            }
-        }
+            },
+        },
+        FileEncodingHint::Gb18030 => match GB18030.decode(body_bytes, DecoderTrap::Strict) {
+            Ok(s) => s,
+            Err(_) => String::from_utf8_lossy(body_bytes).into_owned(),
+        },
     };
 
     // 处理 ORA 前缀
@@ -421,10 +405,7 @@ mod tests {
 
     #[test]
     fn dot_suffix_no_real_indicators_guarded() {
-        let raw = build_perf_record(
-            "SELECT url FROM t WHERE url = 'http://example.com'.",
-            "",
-        );
+        let raw = build_perf_record("SELECT url FROM t WHERE url = 'http://example.com'.", "");
         let rec = parse_record(&raw).unwrap();
         assert_eq!(rec.exec_id, 0);
         assert_eq!(rec.exectime, 0.0);
@@ -612,7 +593,8 @@ mod tests {
             .encode(username, EncoderTrap::Strict)
             .expect("encode");
 
-        let mut line: Vec<u8> = b"2025-11-17 16:09:41.123 (EP[2] sess:0xABC thrd:777 user:".to_vec();
+        let mut line: Vec<u8> =
+            b"2025-11-17 16:09:41.123 (EP[2] sess:0xABC thrd:777 user:".to_vec();
         line.extend_from_slice(&user_bytes);
         line.extend_from_slice(b" trxid:0 stmt:0x2 appname:cli) SELECT\n");
 
@@ -629,10 +611,7 @@ mod tests {
     fn find_indicators_split_exectime_keyword_in_sql_body_no_indicators() {
         let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) SELECT * FROM t WHERE col = 'EXECTIME: slow'\n";
         let record = parse_record(raw.as_bytes()).unwrap();
-        assert_eq!(
-            record.sql,
-            "SELECT * FROM t WHERE col = 'EXECTIME: slow'\n"
-        );
+        assert_eq!(record.sql, "SELECT * FROM t WHERE col = 'EXECTIME: slow'\n");
         assert_eq!(record.exec_id, 0);
         assert_eq!(record.exectime, 0.0);
     }
@@ -641,10 +620,7 @@ mod tests {
     fn find_indicators_split_rowcount_keyword_in_sql_body_no_indicators() {
         let raw = "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:u trxid:0 stmt:0 appname:a) SELECT * FROM t WHERE cnt = 'ROWCOUNT: many'\n";
         let record = parse_record(raw.as_bytes()).unwrap();
-        assert_eq!(
-            record.sql,
-            "SELECT * FROM t WHERE cnt = 'ROWCOUNT: many'\n"
-        );
+        assert_eq!(record.sql, "SELECT * FROM t WHERE cnt = 'ROWCOUNT: many'\n");
         assert_eq!(record.rowcount, 0);
     }
 
@@ -712,7 +688,8 @@ mod tests {
         let username = "用户";
         let user_bytes = username.as_bytes();
 
-        let mut line: Vec<u8> = b"2025-11-17 16:09:41.123 (EP[2] sess:0xABC thrd:777 user:".to_vec();
+        let mut line: Vec<u8> =
+            b"2025-11-17 16:09:41.123 (EP[2] sess:0xABC thrd:777 user:".to_vec();
         line.extend_from_slice(user_bytes);
         line.extend_from_slice(b" trxid:0 stmt:0x2 appname:cli) SELECT\n");
 

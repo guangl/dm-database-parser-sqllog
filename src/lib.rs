@@ -85,7 +85,5 @@ pub(crate) mod parser;
 pub(crate) mod record;
 
 pub use error::ParseError;
-pub use parser::{
-    FileEncodingHint, LogIterator, LogParser, LogParserBuilder,
-};
+pub use parser::{FileEncodingHint, LogIterator, LogParser, LogParserBuilder};
 pub use record::Sqllog;
