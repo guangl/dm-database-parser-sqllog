@@ -88,3 +88,8 @@ pub use error::ParseError;
 pub use filter::{Filter, FilterBuilder};
 pub use parser::{FileEncodingHint, LogIterator, LogParser, LogParserBuilder};
 pub use record::Sqllog;
+
+#[cfg(feature = "async")]
+pub mod async_api;
+#[cfg(feature = "async")]
+pub use async_api::{AsyncError, AsyncLogParser};
