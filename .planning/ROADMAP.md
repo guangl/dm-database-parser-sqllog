@@ -37,7 +37,7 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 
 - [x] **Phase 10: Restructure** - 将 src/ 重组为功能分层子模块，保持所有现有测试通过 (completed 2026-05-22)
 - [x] **Phase 11: FilterBuilder** - 实现全字段可组合链式过滤，与 LogParser 迭代器集成 (completed 2026-05-23)
-- [ ] **Phase 12: AsyncAPI** - 引入 tokio async 封装及 feature flag，与 FilterBuilder 集成
+- [x] **Phase 12: AsyncAPI** - 引入 tokio async 封装及 feature flag，与 FilterBuilder 集成 (completed 2026-05-23)
 
 ## Phase Details
 
@@ -124,7 +124,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 12-01-PLAN.md — Cargo.toml 添加 tokio optional dependency + dev-dependency + [features] async；src/async_api/mod.rs 实现 AsyncLogParser + AsyncError + 单元测试；src/lib.rs 在 #[cfg(feature = "async")] 守卫下声明并重导出 async_api（ASYNC-01..04 端到端实现与验收）
+- [x] 12-01-PLAN.md — Cargo.toml 添加 tokio optional dependency + dev-dependency + [features] async；src/async_api/mod.rs 实现 AsyncLogParser + AsyncError + 单元测试；src/lib.rs 在 #[cfg(feature = "async")] 守卫下声明并重导出 async_api（ASYNC-01..04 端到端实现与验收）
 
 ---
 
@@ -143,7 +143,7 @@ Plans:
 | 9. Publishing | v1.1 | 1/1 | Complete | 2026-05-19 |
 | 10. Restructure | v2.0 | 3/3 | Complete   | 2026-05-22 |
 | 11. FilterBuilder | v2.0 | 2/2 | Complete    | 2026-05-23 |
-| 12. AsyncAPI | v2.0 | 0/1 | Planned | - |
+| 12. AsyncAPI | v2.0 | 1/1 | Complete    | 2026-05-23 |
 
 ---
 *Updated: 2026-05-23 — Phase 12 planned (1 plan, single wave)*

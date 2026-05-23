@@ -30,10 +30,10 @@
 
 ### Async（异步 API）
 
-- [ ] **ASYNC-01**: 用户可在 `async fn` 中直接 `await` 解析整个日志文件，无需手写 `spawn_blocking`
-- [ ] **ASYNC-02**: 异步 API 内部使用 `tokio::task::spawn_blocking` 封装同步 mmap 解析，不破坏零拷贝内核路径
-- [ ] **ASYNC-03**: tokio 依赖通过 `features = ["async"]` 可选引入，不使用异步 API 的用户无需依赖 tokio
-- [ ] **ASYNC-04**: 异步 API 支持过滤条件传入（与 FilterBuilder 集成）
+- [x] **ASYNC-01**: 用户可在 `async fn` 中直接 `await` 解析整个日志文件，无需手写 `spawn_blocking`
+- [x] **ASYNC-02**: 异步 API 内部使用 `tokio::task::spawn_blocking` 封装同步 mmap 解析，不破坏零拷贝内核路径
+- [x] **ASYNC-03**: tokio 依赖通过 `features = ["async"]` 可选引入，不使用异步 API 的用户无需依赖 tokio
+- [x] **ASYNC-04**: 异步 API 支持过滤条件传入（与 FilterBuilder 集成）
 
 ## Future Requirements
 
@@ -78,10 +78,10 @@
 | FILTER-08 | Phase 11 | Complete |
 | FILTER-09 | Phase 11 | Complete |
 | FILTER-10 | Phase 11 | Complete |
-| ASYNC-01 | Phase 12 | Pending |
-| ASYNC-02 | Phase 12 | Pending |
-| ASYNC-03 | Phase 12 | Pending |
-| ASYNC-04 | Phase 12 | Pending |
+| ASYNC-01 | Phase 12 | Complete |
+| ASYNC-02 | Phase 12 | Complete |
+| ASYNC-03 | Phase 12 | Complete |
+| ASYNC-04 | Phase 12 | Complete |
 
 **Coverage:**
 - v2.0 requirements: 21 total
