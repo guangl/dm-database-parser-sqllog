@@ -61,7 +61,7 @@
 </details>
 
 <details>
-<summary>v2.0 — Refactor, Filter & Async (Phases 10–11)</summary>
+<summary>v2.0 — Refactor, Filter & Async (Phases 10–12)</summary>
 
 - ✓ src/ 按功能重组为 parser/ filter/ async_api/ 子模块 + record.rs + error.rs — v2.0 (REFACTOR-01)
 - ✓ 内部工具函数（tools.rs）并入对应子模块，对外不可见 — v2.0 (REFACTOR-02)
@@ -70,14 +70,15 @@
 - ✓ FilterBuilder 14 字段全谓词（56 个公开方法），AND 语义组合 — v2.0 (FILTER-01..09)
 - ✓ apply_filter / apply_filter_keep_errors 适配器 + LogIterator 委托方法 — v2.0 (FILTER-10)
 - ✓ exec_time_gte / exec_time_gt 语义区分（WR-01 修复） — v2.0 Phase 11
+- ✓ AsyncLogParser + AsyncError（spawn_blocking 封装 mmap 同步路径）— v2.0 (ASYNC-01/02)
+- ✓ tokio feature flag（`features = ["async"]`）：默认构建零 tokio 依赖 — v2.0 (ASYNC-03)
+- ✓ with_filter / encoding_hint builder 方法 — v2.0 (ASYNC-04)
 
 </details>
 
 ### Active
 
-- [ ] ASYNC-01: async_api/ 提供 parse_file_async 等异步入口函数 — v2.0 Phase 12
-- [ ] ASYNC-02: 内部用 tokio::task::spawn_blocking 封装同步 mmap 解析 — v2.0 Phase 12
-- [ ] ASYNC-03: tokio feature flag 控制依赖，不强制所有用户引入 tokio — v2.0 Phase 12
+（所有 v2.0 requirements 已验证）
 
 ### Known Gaps
 
@@ -140,4 +141,4 @@
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-23 — Phase 11 FilterBuilder complete (56 predicate methods, all tests pass)*
+*Last updated: 2026-05-23 — Phase 12 AsyncAPI complete (AsyncLogParser, tokio optional feature, coverage 90.65%)*
