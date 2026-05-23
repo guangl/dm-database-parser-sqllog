@@ -223,4 +223,22 @@ mod tests {
             "ParseError 应转换为 AsyncError::Parse"
         );
     }
+
+    #[cfg(not(miri))]
+    #[tokio::test]
+    async fn test_parse_panic_becomes_async_error() {
+        let result: Result<Vec<Sqllog>, AsyncError> = {
+            let blocking = tokio::task::spawn_blocking(|| -> Result<Vec<Sqllog>, crate::error::ParseError> {
+                panic!("intentional test panic");
+            })
+            .await;
+            blocking
+                .map_err(|e| AsyncError::Panic(e.to_string()))
+                .and_then(|r| r.map_err(AsyncError::Parse))
+        };
+        assert!(matches!(result, Err(AsyncError::Panic(_))));
+        if let Err(AsyncError::Panic(msg)) = result {
+            assert!(!msg.is_empty());
+        }
+    }
 }
