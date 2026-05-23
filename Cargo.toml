@@ -41,10 +41,15 @@ atoi = "2.0.0"
 memchr = "2.7.6"
 thiserror = "2.0.17"
 encoding = "0.2"
+tokio = { version = "1", features = ["rt"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "plotters"] }
 tempfile = "3.8"
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[features]
+async = ["tokio/rt"]
 
 [[bench]]
 name = "parser_benchmark"
