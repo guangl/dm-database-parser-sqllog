@@ -1,21 +1,25 @@
-# dm-database-parser-sqllog 性能优化
+# dm-database-parser-sqllog
 
 ## What This Is
 
-高性能 Rust 库 `dm-database-parser-sqllog` 的性能优化与 API 完善项目。该库用于解析达梦数据库 SQL 日志文件，支持内存映射 I/O、零拷贝延迟解析、SIMD UTF-8 校验、memmem SIMD 混合边界检测、以及两阶段并行 RecordIndex。v1.0 通过 5 个阶段的系统优化，单线程吞吐提升 35.5%，达到 8.67 GiB/s。v1.1 通过 4 个阶段完善了 API 易用性（LogParserBuilder、过滤方法、字段访问、FromSqllog）、文档质量和 crates.io 发布准备。v2.0 重构 src/ 为功能分层子模块，添加全字段可组合 FilterBuilder（56 个谓词方法，14 字段覆盖），并引入 tokio async 可选 feature。
+高性能 Rust 库 `dm-database-parser-sqllog`，用于解析达梦数据库 SQL 日志文件。支持内存映射 I/O、零拷贝延迟解析、SIMD UTF-8 校验、memmem SIMD 混合边界检测、两阶段并行 RecordIndex、全字段可组合 FilterBuilder（56 个谓词方法）、以及 tokio async 可选接口。代码已按功能分层重组（parser/ filter/ async_api/ record.rs error.rs）。
+
+v1.0 单线程吞吐 8.67 GiB/s（+35.5%），v1.1 完善 API 易用性并发布 crates.io，v2.0 完成代码现代化并添加全字段过滤与 async API。
 
 ## Core Value
 
 在任意硬件上达到尽可能高的解析吞吐量（records/sec 和 GB/s），同时提供符合 Rust 生态习惯的易用 API。
 
-## Current Milestone: v2.0 Refactor, Filter & Async
+## Current State: v2.0 Shipped
 
-**Goal:** 重构 src/ 目录为功能分层结构，添加全字段可组合过滤，引入 tokio async API。
+**Shipped:** 2026-05-23
+**Version in Cargo.toml:** 2.0.0（待确认）
 
-**Target features:**
-- 代码重构：src/ 按功能分层（parser/ filter/ async_api/ record.rs error.rs）；整理内部模块边界；更新 examples 和 docs
-- 全字段过滤：14 个 Sqllog 字段全部可链式过滤（AND 组合），每字段有类型匹配谓词
-- Tokio async API：async_api/ 模块提供 async fn，内部用 spawn_blocking 封装；tokio feature flag 控制依赖
+**What's available now:**
+- 功能分层模块结构（parser/ filter/ async_api/ record.rs error.rs）
+- FilterBuilder：56 个链式谓词方法，14 字段全覆盖，AND 语义组合
+- AsyncLogParser：tokio optional feature，spawn_blocking 封装零拷贝路径
+- 覆盖率 ≥90%，clippy 零警告，全量测试通过
 
 ## Requirements
 
@@ -61,15 +65,14 @@
 </details>
 
 <details>
-<summary>v2.0 — Refactor, Filter & Async (Phases 10–12)</summary>
+<summary>v2.0 — Refactor, Filter & Async</summary>
 
-- ✓ src/ 按功能重组为 parser/ filter/ async_api/ 子模块 + record.rs + error.rs — v2.0 (REFACTOR-01)
-- ✓ 内部工具函数（tools.rs）并入对应子模块，对外不可见 — v2.0 (REFACTOR-02)
-- ✓ lib.rs 顶层重导出所有公开类型，保持用户侧导入路径兼容 — v2.0 (REFACTOR-03)
-- ✓ examples/ 和文档更新以反映新结构 — v2.0 (REFACTOR-04)
-- ✓ FilterBuilder 14 字段全谓词（56 个公开方法），AND 语义组合 — v2.0 (FILTER-01..09)
+- ✓ src/ 按功能重组为 parser/ filter/ async_api/ 子模块 + record.rs + error.rs — v2.0 (REFACTOR-01~05)
+- ✓ lib.rs 顶层重导出所有公开类型，保持用户侧导入路径兼容 — v2.0 (REFACTOR-06)
+- ✓ examples/ 和文档更新以反映新结构 — v2.0 (REFACTOR-07)
+- ✓ FilterBuilder 14 字段全谓词（56 个公开方法），AND 语义组合 — v2.0 (FILTER-01~09)
 - ✓ apply_filter / apply_filter_keep_errors 适配器 + LogIterator 委托方法 — v2.0 (FILTER-10)
-- ✓ exec_time_gte / exec_time_gt 语义区分（WR-01 修复） — v2.0 Phase 11
+- ✓ exec_time_gte / exec_time_gt 语义区分（历史兼容 + 精度保证）— v2.0 Phase 11
 - ✓ AsyncLogParser + AsyncError（spawn_blocking 封装 mmap 同步路径）— v2.0 (ASYNC-01/02)
 - ✓ tokio feature flag（`features = ["async"]`）：默认构建零 tokio 依赖 — v2.0 (ASYNC-03)
 - ✓ with_filter / encoding_hint builder 方法 — v2.0 (ASYNC-04)
@@ -78,7 +81,7 @@
 
 ### Active
 
-（所有 v2.0 requirements 已验证）
+（所有 v2.0 requirements 已验证，等待下一里程碑定义新需求）
 
 ### Known Gaps
 
@@ -89,17 +92,17 @@
 - 支持新日志格式 — 功能需求，不在优化范围
 - GB18030 编码路径深度优化 — 场景罕见，收益不高
 - 自定义 SIMD 换行扫描（packed_simd / std::simd）— `memchr` 已是天花板
-- async/tokio 集成（零拷贝方案）— Cow<'a> 生命周期无法跨 spawn_blocking；v2.0 改用 Vec<Sqllog<'static>> owned 方案解决
+- async/tokio 零拷贝方案 — Cow<'a> 生命周期无法跨 spawn_blocking；v2.0 改用 Vec<Sqllog<'static>> owned 方案
 - 全局默认 mimalloc — 库 crate 不应强制用户分配器
 - crate 名称简化（如 dm-sqllog）— 名称变更影响所有用户
 
 ## Context
 
 - **v1.0 最终吞吐**：8.67 GiB/s 单线程（5 MB 合成语料库，含 20% 多行）
-- **v1.1 代码量**：1,453 行 Rust（src）
-- **v1.1 变更规模**：21 文件，+1089/-241 行，53 commits
-- **v1.1 里程碑**：4 阶段，9 计划，2026-05-19 一天完成
-- **测试覆盖**：≥90% 行覆盖率，88 个测试 + 8 个 doc-tests
+- **v2.0 代码量**：2,551 行 Rust（src/）
+- **v2.0 变更规模**：66 文件，+9,832/-3,250 行，~30 commits
+- **v2.0 里程碑**：3 阶段，6 计划，2026-05-21→23（3 天）
+- **测试覆盖**：≥90% 行覆盖率（最终 90.65%），全量测试（含 async feature）通过
 - **并行上限**：受 Amdahl 定律约束，par_iter() 在 8.4 GiB/s 吞吐下接近单核利用上限
 
 ## Constraints
@@ -121,9 +124,10 @@
 | Phase 5 accept-as-is（PAR-02） | Amdahl 定律：index() 串行主导，并行无收益 | ✓ 有据可查 |
 | v1.1 跳版到 1.1.0（不发 1.0.0） | v1.0 milestone 是内部优化，API 未稳定；v1.1 是第一个语义化版本 | ✓ Good |
 | README 使用中文 | 达梦数据库用户主要是中文开发者 | ✓ Good |
-| FilterBuilder Predicate 类型别名 | Box<dyn Fn(&Sqllog) -> bool + Send + Sync> 解决 clippy::type_complexity；'static 为未来 async 预留 | ✓ Good |
+| FilterBuilder Predicate 类型别名 | Box<dyn Fn(&Sqllog) -> bool + Send + Sync> 解决 clippy::type_complexity；'static 为 async 预留 | ✓ Good |
 | exectime 不提供 eq，提供 gte/gt | f32 浮点精度问题，between 替代等值比较；gte 与历史 filter_by_exec_time 语义对齐 | ✓ Good |
 | async 返回 Vec<Sqllog<'static>> | mmap 同步解析；spawn_blocking 内部需 owned 数据，Cow<'a> 无法跨线程 | ✓ Good |
+| tokio 用 dep:tokio 而非 tokio/rt | Cargo 惯用写法，dev-dep 独立控制，语义等价 | ✓ Good |
 
 ## Evolution
 
@@ -141,4 +145,4 @@
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-23 — Phase 12 AsyncAPI complete (AsyncLogParser, tokio optional feature, coverage 90.65%)*
+*Last updated: 2026-05-23 after v2.0 milestone — Refactor, Filter & Async shipped*
