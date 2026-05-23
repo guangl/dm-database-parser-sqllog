@@ -2,7 +2,7 @@
 
 ## What This Is
 
-高性能 Rust 库 `dm-database-parser-sqllog` 的性能优化与 API 完善项目。该库用于解析达梦数据库 SQL 日志文件，支持内存映射 I/O、零拷贝延迟解析、SIMD UTF-8 校验、memmem SIMD 混合边界检测、以及两阶段并行 RecordIndex。v1.0 通过 5 个阶段的系统优化，单线程吞吐提升 35.5%，达到 8.67 GiB/s。v1.1 通过 4 个阶段完善了 API 易用性（LogParserBuilder、过滤方法、字段访问、FromSqllog）、文档质量和 crates.io 发布准备。
+高性能 Rust 库 `dm-database-parser-sqllog` 的性能优化与 API 完善项目。该库用于解析达梦数据库 SQL 日志文件，支持内存映射 I/O、零拷贝延迟解析、SIMD UTF-8 校验、memmem SIMD 混合边界检测、以及两阶段并行 RecordIndex。v1.0 通过 5 个阶段的系统优化，单线程吞吐提升 35.5%，达到 8.67 GiB/s。v1.1 通过 4 个阶段完善了 API 易用性（LogParserBuilder、过滤方法、字段访问、FromSqllog）、文档质量和 crates.io 发布准备。v2.0 重构 src/ 为功能分层子模块，添加全字段可组合 FilterBuilder（56 个谓词方法，14 字段覆盖），并引入 tokio async 可选 feature。
 
 ## Core Value
 
@@ -60,19 +60,24 @@
 
 </details>
 
+<details>
+<summary>v2.0 — Refactor, Filter & Async (Phases 10–11)</summary>
+
+- ✓ src/ 按功能重组为 parser/ filter/ async_api/ 子模块 + record.rs + error.rs — v2.0 (REFACTOR-01)
+- ✓ 内部工具函数（tools.rs）并入对应子模块，对外不可见 — v2.0 (REFACTOR-02)
+- ✓ lib.rs 顶层重导出所有公开类型，保持用户侧导入路径兼容 — v2.0 (REFACTOR-03)
+- ✓ examples/ 和文档更新以反映新结构 — v2.0 (REFACTOR-04)
+- ✓ FilterBuilder 14 字段全谓词（56 个公开方法），AND 语义组合 — v2.0 (FILTER-01..09)
+- ✓ apply_filter / apply_filter_keep_errors 适配器 + LogIterator 委托方法 — v2.0 (FILTER-10)
+- ✓ exec_time_gte / exec_time_gt 语义区分（WR-01 修复） — v2.0 Phase 11
+
+</details>
+
 ### Active
 
-- [ ] REFACTOR-01: src/ 按功能重组为 parser/ filter/ async_api/ 子模块 + record.rs + error.rs — v2.0
-- [ ] REFACTOR-02: 内部工具函数（tools.rs）分配到合适子模块，对外不可见 — v2.0
-- [ ] REFACTOR-03: lib.rs 顶层重导出所有公开类型，保持用户侧导入路径兼容 — v2.0
-- [ ] REFACTOR-04: examples/ 和文档更新以反映新结构和新 API — v2.0
-- [ ] FILTER-01: FilterBuilder 支持 14 个 Sqllog 字段的链式过滤条件 — v2.0
-- [ ] FILTER-02: 字符串字段支持 contains/eq/starts_with/ends_with 谓词 — v2.0
-- [ ] FILTER-03: 数值字段支持 eq/gt/lt/between 谓词（exectime/rowcount/exec_id/ep） — v2.0
-- [ ] FILTER-04: FilterBuilder 与 LogParser 迭代器无缝集成 — v2.0
-- [ ] ASYNC-01: async_api/ 提供 parse_file_async 等异步入口函数 — v2.0
-- [ ] ASYNC-02: 内部用 tokio::task::spawn_blocking 封装同步 mmap 解析 — v2.0
-- [ ] ASYNC-03: tokio feature flag 控制依赖，不强制所有用户引入 tokio — v2.0
+- [ ] ASYNC-01: async_api/ 提供 parse_file_async 等异步入口函数 — v2.0 Phase 12
+- [ ] ASYNC-02: 内部用 tokio::task::spawn_blocking 封装同步 mmap 解析 — v2.0 Phase 12
+- [ ] ASYNC-03: tokio feature flag 控制依赖，不强制所有用户引入 tokio — v2.0 Phase 12
 
 ### Known Gaps
 
@@ -83,7 +88,7 @@
 - 支持新日志格式 — 功能需求，不在优化范围
 - GB18030 编码路径深度优化 — 场景罕见，收益不高
 - 自定义 SIMD 换行扫描（packed_simd / std::simd）— `memchr` 已是天花板
-- async/tokio 集成 — 破坏零拷贝 `Cow<'a>` 生命周期设计
+- async/tokio 集成（零拷贝方案）— Cow<'a> 生命周期无法跨 spawn_blocking；v2.0 改用 Vec<Sqllog<'static>> owned 方案解决
 - 全局默认 mimalloc — 库 crate 不应强制用户分配器
 - crate 名称简化（如 dm-sqllog）— 名称变更影响所有用户
 
@@ -115,6 +120,9 @@
 | Phase 5 accept-as-is（PAR-02） | Amdahl 定律：index() 串行主导，并行无收益 | ✓ 有据可查 |
 | v1.1 跳版到 1.1.0（不发 1.0.0） | v1.0 milestone 是内部优化，API 未稳定；v1.1 是第一个语义化版本 | ✓ Good |
 | README 使用中文 | 达梦数据库用户主要是中文开发者 | ✓ Good |
+| FilterBuilder Predicate 类型别名 | Box<dyn Fn(&Sqllog) -> bool + Send + Sync> 解决 clippy::type_complexity；'static 为未来 async 预留 | ✓ Good |
+| exectime 不提供 eq，提供 gte/gt | f32 浮点精度问题，between 替代等值比较；gte 与历史 filter_by_exec_time 语义对齐 | ✓ Good |
+| async 返回 Vec<Sqllog<'static>> | mmap 同步解析；spawn_blocking 内部需 owned 数据，Cow<'a> 无法跨线程 | ✓ Good |
 
 ## Evolution
 
@@ -132,4 +140,4 @@
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-22 — v2.0 milestone started*
+*Last updated: 2026-05-23 — Phase 11 FilterBuilder complete (56 predicate methods, all tests pass)*
