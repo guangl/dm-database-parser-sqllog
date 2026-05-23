@@ -119,6 +119,13 @@ Plans:
   4. async API 接受 `FilterBuilder` 参数，用户可传入过滤条件，结果已在 `spawn_blocking` 内部完成过滤
   5. `cargo test --features async` 全量通过，覆盖率 ≥90%（含 async 代码路径）
 
+**Plans**: 1 plan
+
+Plans:
+**Wave 1**
+
+- [ ] 12-01-PLAN.md — Cargo.toml 添加 tokio optional dependency + dev-dependency + [features] async；src/async_api/mod.rs 实现 AsyncLogParser + AsyncError + 单元测试；src/lib.rs 在 #[cfg(feature = "async")] 守卫下声明并重导出 async_api（ASYNC-01..04 端到端实现与验收）
+
 ---
 
 ## Progress
@@ -136,7 +143,7 @@ Plans:
 | 9. Publishing | v1.1 | 1/1 | Complete | 2026-05-19 |
 | 10. Restructure | v2.0 | 3/3 | Complete   | 2026-05-22 |
 | 11. FilterBuilder | v2.0 | 0/2 | Planned | - |
-| 12. AsyncAPI | v2.0 | 0/? | Not started | - |
+| 12. AsyncAPI | v2.0 | 0/1 | Planned | - |
 
 ---
-*Updated: 2026-05-22 — Phase 11 planned (2 plans, sequential waves)*
+*Updated: 2026-05-23 — Phase 12 planned (1 plan, single wave)*
