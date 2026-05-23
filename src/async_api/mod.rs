@@ -59,10 +59,22 @@ impl AsyncLogParser {
 
     /// 在阻塞线程池中解析日志文件，返回所有匹配的记录。
     ///
+    /// # 注意
+    ///
+    /// 单条记录的解析错误会被**静默丢弃**，不会影响返回值的 `Ok` 状态。
+    /// `Ok(vec![])` 可能代表文件为空，也可能代表所有记录均解析失败。
+    /// 若需获知被跳过的记录数，请使用未来将提供的 `parse_strict()` API。
+    ///
     /// # 错误
     ///
     /// - [`AsyncError::Parse`]：文件不存在、格式错误等解析错误
     /// - [`AsyncError::Panic`]：阻塞任务内部 panic
+    ///
+    /// # Panics
+    ///
+    /// 若调用方不在 tokio 运行时上下文中（如在裸 `std::thread` 中直接调用），
+    /// `spawn_blocking` 会 panic，此 panic 会被捕获并以 [`AsyncError::Panic`] 返回，
+    /// 而非直接 unwind 调用方。
     pub async fn parse(self) -> Result<Vec<Sqllog>, AsyncError> {
         let path = self.path;
         let encoding_hint = self.encoding_hint;
@@ -210,5 +222,23 @@ mod tests {
             matches!(async_err, AsyncError::Parse(_)),
             "ParseError 应转换为 AsyncError::Parse"
         );
+    }
+
+    #[cfg(not(miri))]
+    #[tokio::test]
+    async fn test_parse_panic_becomes_async_error() {
+        let result: Result<Vec<Sqllog>, AsyncError> = {
+            let blocking = tokio::task::spawn_blocking(|| -> Result<Vec<Sqllog>, crate::error::ParseError> {
+                panic!("intentional test panic");
+            })
+            .await;
+            blocking
+                .map_err(|e| AsyncError::Panic(e.to_string()))
+                .and_then(|r| r.map_err(AsyncError::Parse))
+        };
+        assert!(matches!(result, Err(AsyncError::Panic(_))));
+        if let Err(AsyncError::Panic(msg)) = result {
+            assert!(!msg.is_empty());
+        }
     }
 }
