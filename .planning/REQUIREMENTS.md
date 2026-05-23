@@ -17,16 +17,16 @@
 
 ### Filter（全字段过滤）
 
-- [ ] **FILTER-01**: 用户可对 `ts`（时间戳字符串）进行 contains / eq / starts_with / ends_with 过滤
-- [ ] **FILTER-02**: 用户可对 `tag`（Option<String>）进行存在性检查和值匹配过滤
-- [ ] **FILTER-03**: 用户可对 `ep`（u8）进行 eq / gt / lt / between 过滤
-- [ ] **FILTER-04**: 用户可对 `sess_id`、`thrd_id`、`username`、`trxid`、`statement`、`appname`、`client_ip` 进行 contains / eq / starts_with / ends_with 过滤
-- [ ] **FILTER-05**: 用户可对 `sql` 进行 contains / eq / starts_with / ends_with 过滤
-- [ ] **FILTER-06**: 用户可对 `exectime`（f32）进行 gt / lt / between 过滤
-- [ ] **FILTER-07**: 用户可对 `rowcount`（u32）进行 eq / gt / lt / between 过滤
-- [ ] **FILTER-08**: 用户可对 `exec_id`（i64）进行 eq / gt / lt / between 过滤
-- [ ] **FILTER-09**: 用户可将多个过滤条件链式 AND 组合，通过一次迭代完成多条件筛选
-- [ ] **FILTER-10**: FilterBuilder 与现有 `LogParser` 迭代器无缝集成（返回 `impl Iterator<Item = Sqllog>`）
+- [x] **FILTER-01**: 用户可对 `ts`（时间戳字符串）进行 contains / eq / starts_with / ends_with 过滤
+- [x] **FILTER-02**: 用户可对 `tag`（Option<String>）进行存在性检查和值匹配过滤
+- [x] **FILTER-03**: 用户可对 `ep`（u8）进行 eq / gt / lt / between 过滤
+- [x] **FILTER-04**: 用户可对 `sess_id`、`thrd_id`、`username`、`trxid`、`statement`、`appname`、`client_ip` 进行 contains / eq / starts_with / ends_with 过滤
+- [x] **FILTER-05**: 用户可对 `sql` 进行 contains / eq / starts_with / ends_with 过滤
+- [x] **FILTER-06**: 用户可对 `exectime`（f32）进行 gt / lt / between 过滤
+- [x] **FILTER-07**: 用户可对 `rowcount`（u32）进行 eq / gt / lt / between 过滤
+- [x] **FILTER-08**: 用户可对 `exec_id`（i64）进行 eq / gt / lt / between 过滤
+- [x] **FILTER-09**: 用户可将多个过滤条件链式 AND 组合，通过一次迭代完成多条件筛选
+- [x] **FILTER-10**: FilterBuilder 与现有 `LogParser` 迭代器无缝集成（返回 `impl Iterator<Item = Sqllog>`）
 
 ### Async（异步 API）
 
@@ -68,16 +68,16 @@
 | REFACTOR-05 | Phase 10 | Pending |
 | REFACTOR-06 | Phase 10 | Complete |
 | REFACTOR-07 | Phase 10 | Complete |
-| FILTER-01 | Phase 11 | Pending |
-| FILTER-02 | Phase 11 | Pending |
-| FILTER-03 | Phase 11 | Pending |
-| FILTER-04 | Phase 11 | Pending |
-| FILTER-05 | Phase 11 | Pending |
-| FILTER-06 | Phase 11 | Pending |
-| FILTER-07 | Phase 11 | Pending |
-| FILTER-08 | Phase 11 | Pending |
-| FILTER-09 | Phase 11 | Pending |
-| FILTER-10 | Phase 11 | Pending |
+| FILTER-01 | Phase 11 | Complete |
+| FILTER-02 | Phase 11 | Complete |
+| FILTER-03 | Phase 11 | Complete |
+| FILTER-04 | Phase 11 | Complete |
+| FILTER-05 | Phase 11 | Complete |
+| FILTER-06 | Phase 11 | Complete |
+| FILTER-07 | Phase 11 | Complete |
+| FILTER-08 | Phase 11 | Complete |
+| FILTER-09 | Phase 11 | Complete |
+| FILTER-10 | Phase 11 | Complete |
 | ASYNC-01 | Phase 12 | Pending |
 | ASYNC-02 | Phase 12 | Pending |
 | ASYNC-03 | Phase 12 | Pending |

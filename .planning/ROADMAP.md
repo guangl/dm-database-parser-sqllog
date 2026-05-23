@@ -36,7 +36,7 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 ### v2.0 Refactor, Filter & Async
 
 - [x] **Phase 10: Restructure** - 将 src/ 重组为功能分层子模块，保持所有现有测试通过 (completed 2026-05-22)
-- [ ] **Phase 11: FilterBuilder** - 实现全字段可组合链式过滤，与 LogParser 迭代器集成
+- [x] **Phase 11: FilterBuilder** - 实现全字段可组合链式过滤，与 LogParser 迭代器集成 (completed 2026-05-23)
 - [ ] **Phase 12: AsyncAPI** - 引入 tokio async 封装及 feature flag，与 FilterBuilder 集成
 
 ## Phase Details
@@ -95,11 +95,11 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 11-01-PLAN.md — 新建 src/filter/builder.rs，实现 Filter + FilterBuilder + 14 字段全部链式谓词方法（约 50 个公开方法）+ 完整 #[cfg(test)] 单元测试块；更新 src/filter/mod.rs 重导出（FILTER-01~09 类型与方法表面）
+- [x] 11-01-PLAN.md — 新建 src/filter/builder.rs，实现 Filter + FilterBuilder + 14 字段全部链式谓词方法（约 50 个公开方法）+ 完整 #[cfg(test)] 单元测试块；更新 src/filter/mod.rs 重导出（FILTER-01~09 类型与方法表面）
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 11-02-PLAN.md — adapter.rs 扩展 apply_filter / apply_filter_keep_errors；iterator.rs 上 LogIterator 暴露对应 pub 方法；lib.rs 顶层 pub use Filter / FilterBuilder；新增 examples/filter_builder.rs 与 tests/filter_builder.rs 集成测试；跑通 cargo test / clippy / cargo llvm-cov ≥90%（FILTER-09/10 集成与端到端验收）
+- [x] 11-02-PLAN.md — adapter.rs 扩展 apply_filter / apply_filter_keep_errors；iterator.rs 上 LogIterator 暴露对应 pub 方法；lib.rs 顶层 pub use Filter / FilterBuilder；新增 examples/filter_builder.rs 与 tests/filter_builder.rs 集成测试；跑通 cargo test / clippy / cargo llvm-cov ≥90%（FILTER-09/10 集成与端到端验收）
 
 ---
 
@@ -142,7 +142,7 @@ Plans:
 | 8. Documentation | v1.1 | 3/3 | Complete | 2026-05-19 |
 | 9. Publishing | v1.1 | 1/1 | Complete | 2026-05-19 |
 | 10. Restructure | v2.0 | 3/3 | Complete   | 2026-05-22 |
-| 11. FilterBuilder | v2.0 | 0/2 | Planned | - |
+| 11. FilterBuilder | v2.0 | 2/2 | Complete    | 2026-05-23 |
 | 12. AsyncAPI | v2.0 | 0/1 | Planned | - |
 
 ---
