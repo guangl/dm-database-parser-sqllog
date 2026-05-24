@@ -1,9 +1,9 @@
 [package]
 name = "dm-database-parser-sqllog"
-version = "1.1.0"
+version = "2.0.0"
 edition = "2024"
 authors = ["guangl"]
-description = "一个高性能的达梦数据库 sqllog 日志解析库，支持 LogParserBuilder 链式配置、过滤方法和直接字段访问"
+description = "一个高性能的达梦数据库 sqllog 日志解析库，支持 FilterBuilder 全字段链式过滤、AsyncLogParser tokio 异步接口和 LogParserBuilder 链式配置"
 license = "MIT"
 repository = "https://github.com/guangl/dm-database-parser-sqllog"
 documentation = "https://docs.rs/dm-database-parser-sqllog"
