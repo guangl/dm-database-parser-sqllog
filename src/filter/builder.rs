@@ -411,7 +411,10 @@ impl FilterBuilder {
     /// # Panics
     /// 当 `min > max` 时 panic。
     pub fn rowcount_between(self, min: u32, max: u32) -> Self {
-        assert!(min <= max, "rowcount_between: min ({min}) must be <= max ({max})");
+        assert!(
+            min <= max,
+            "rowcount_between: min ({min}) must be <= max ({max})"
+        );
         self.add(move |r| r.rowcount >= min && r.rowcount <= max)
     }
 
@@ -437,7 +440,10 @@ impl FilterBuilder {
     /// # Panics
     /// 当 `min > max` 时 panic。
     pub fn exec_id_between(self, min: i64, max: i64) -> Self {
-        assert!(min <= max, "exec_id_between: min ({min}) must be <= max ({max})");
+        assert!(
+            min <= max,
+            "exec_id_between: min ({min}) must be <= max ({max})"
+        );
         self.add(move |r| r.exec_id >= min && r.exec_id <= max)
     }
 }
@@ -477,29 +483,69 @@ mod tests {
     #[test]
     fn test_ts_contains() {
         let record = make_record();
-        assert!(FilterBuilder::new().ts_contains("2024-06").build().matches(&record));
-        assert!(!FilterBuilder::new().ts_contains("2025-01").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .ts_contains("2024-06")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .ts_contains("2025-01")
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_ts_eq() {
         let record = make_record();
-        assert!(FilterBuilder::new().ts_eq("2024-06-01 10:00:00.000").build().matches(&record));
-        assert!(!FilterBuilder::new().ts_eq("2024-06-01 10:00:00.001").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .ts_eq("2024-06-01 10:00:00.000")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .ts_eq("2024-06-01 10:00:00.001")
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_ts_starts_with() {
         let record = make_record();
-        assert!(FilterBuilder::new().ts_starts_with("2024").build().matches(&record));
-        assert!(!FilterBuilder::new().ts_starts_with("2025").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .ts_starts_with("2024")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .ts_starts_with("2025")
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_ts_ends_with() {
         let record = make_record();
-        assert!(FilterBuilder::new().ts_ends_with(".000").build().matches(&record));
-        assert!(!FilterBuilder::new().ts_ends_with(".999").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .ts_ends_with(".000")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .ts_ends_with(".999")
+                .build()
+                .matches(&record)
+        );
     }
 
     // ── FILTER-02: tag ──
@@ -532,8 +578,18 @@ mod tests {
     #[test]
     fn test_tag_contains() {
         let record = make_record();
-        assert!(FilterBuilder::new().tag_contains("SE").build().matches(&record));
-        assert!(!FilterBuilder::new().tag_contains("ORA").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .tag_contains("SE")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .tag_contains("ORA")
+                .build()
+                .matches(&record)
+        );
     }
 
     // ── FILTER-03: ep ──
@@ -562,8 +618,18 @@ mod tests {
     #[test]
     fn test_ep_between() {
         let record = make_record();
-        assert!(FilterBuilder::new().ep_between(1, 3).build().matches(&record));
-        assert!(!FilterBuilder::new().ep_between(3, 5).build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .ep_between(1, 3)
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .ep_between(3, 5)
+                .build()
+                .matches(&record)
+        );
     }
 
     // ── FILTER-04: 七个字符串元数据字段 ──
@@ -571,50 +637,120 @@ mod tests {
     #[test]
     fn test_sess_id_contains() {
         let record = make_record();
-        assert!(FilterBuilder::new().sess_id_contains("ABC").build().matches(&record));
-        assert!(!FilterBuilder::new().sess_id_contains("XYZ").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .sess_id_contains("ABC")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .sess_id_contains("XYZ")
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_thrd_id_contains() {
         let record = make_record();
-        assert!(FilterBuilder::new().thrd_id_contains("12").build().matches(&record));
-        assert!(!FilterBuilder::new().thrd_id_contains("99").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .thrd_id_contains("12")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .thrd_id_contains("99")
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_username_contains() {
         let record = make_record();
-        assert!(FilterBuilder::new().username_contains("ali").build().matches(&record));
-        assert!(!FilterBuilder::new().username_contains("bob").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .username_contains("ali")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .username_contains("bob")
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_trxid_contains() {
         let record = make_record();
-        assert!(FilterBuilder::new().trxid_contains("0").build().matches(&record));
-        assert!(!FilterBuilder::new().trxid_contains("99").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .trxid_contains("0")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .trxid_contains("99")
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_statement_contains() {
         let record = make_record();
-        assert!(FilterBuilder::new().statement_contains("0x1").build().matches(&record));
-        assert!(!FilterBuilder::new().statement_contains("0x2").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .statement_contains("0x1")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .statement_contains("0x2")
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_appname_contains() {
         let record = make_record();
-        assert!(FilterBuilder::new().appname_contains("app").build().matches(&record));
-        assert!(!FilterBuilder::new().appname_contains("xyz").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .appname_contains("app")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .appname_contains("xyz")
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_client_ip_contains() {
         let record = make_record();
-        assert!(FilterBuilder::new().client_ip_contains("10.0").build().matches(&record));
-        assert!(!FilterBuilder::new().client_ip_contains("192.168").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .client_ip_contains("10.0")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .client_ip_contains("192.168")
+                .build()
+                .matches(&record)
+        );
     }
 
     // ── FILTER-05: sql ──
@@ -622,29 +758,69 @@ mod tests {
     #[test]
     fn test_sql_contains() {
         let record = make_record();
-        assert!(FilterBuilder::new().sql_contains("SELECT").build().matches(&record));
-        assert!(!FilterBuilder::new().sql_contains("INSERT").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .sql_contains("SELECT")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .sql_contains("INSERT")
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_sql_eq() {
         let record = make_record();
-        assert!(FilterBuilder::new().sql_eq("SELECT * FROM users").build().matches(&record));
-        assert!(!FilterBuilder::new().sql_eq("SELECT 1").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .sql_eq("SELECT * FROM users")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .sql_eq("SELECT 1")
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_sql_starts_with() {
         let record = make_record();
-        assert!(FilterBuilder::new().sql_starts_with("SELECT").build().matches(&record));
-        assert!(!FilterBuilder::new().sql_starts_with("UPDATE").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .sql_starts_with("SELECT")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .sql_starts_with("UPDATE")
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_sql_ends_with() {
         let record = make_record();
-        assert!(FilterBuilder::new().sql_ends_with("users").build().matches(&record));
-        assert!(!FilterBuilder::new().sql_ends_with("orders").build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .sql_ends_with("users")
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .sql_ends_with("orders")
+                .build()
+                .matches(&record)
+        );
     }
 
     // ── FILTER-06: exectime ──
@@ -652,22 +828,52 @@ mod tests {
     #[test]
     fn test_exec_time_gt() {
         let record = make_record();
-        assert!(FilterBuilder::new().exec_time_gt(100.0).build().matches(&record));
-        assert!(!FilterBuilder::new().exec_time_gt(200.0).build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .exec_time_gt(100.0)
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .exec_time_gt(200.0)
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_exec_time_lt() {
         let record = make_record();
-        assert!(FilterBuilder::new().exec_time_lt(200.0).build().matches(&record));
-        assert!(!FilterBuilder::new().exec_time_lt(100.0).build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .exec_time_lt(200.0)
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .exec_time_lt(100.0)
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_exec_time_between() {
         let record = make_record();
-        assert!(FilterBuilder::new().exec_time_between(100.0, 200.0).build().matches(&record));
-        assert!(!FilterBuilder::new().exec_time_between(200.0, 300.0).build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .exec_time_between(100.0, 200.0)
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .exec_time_between(200.0, 300.0)
+                .build()
+                .matches(&record)
+        );
     }
 
     // ── FILTER-07: rowcount ──
@@ -675,29 +881,64 @@ mod tests {
     #[test]
     fn test_rowcount_eq() {
         let record = make_record();
-        assert!(FilterBuilder::new().rowcount_eq(10).build().matches(&record));
-        assert!(!FilterBuilder::new().rowcount_eq(99).build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .rowcount_eq(10)
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .rowcount_eq(99)
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_rowcount_gt() {
         let record = make_record();
         assert!(FilterBuilder::new().rowcount_gt(5).build().matches(&record));
-        assert!(!FilterBuilder::new().rowcount_gt(10).build().matches(&record));
+        assert!(
+            !FilterBuilder::new()
+                .rowcount_gt(10)
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_rowcount_lt() {
         let record = make_record();
-        assert!(FilterBuilder::new().rowcount_lt(20).build().matches(&record));
-        assert!(!FilterBuilder::new().rowcount_lt(10).build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .rowcount_lt(20)
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .rowcount_lt(10)
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_rowcount_between() {
         let record = make_record();
-        assert!(FilterBuilder::new().rowcount_between(5, 15).build().matches(&record));
-        assert!(!FilterBuilder::new().rowcount_between(20, 50).build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .rowcount_between(5, 15)
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .rowcount_between(20, 50)
+                .build()
+                .matches(&record)
+        );
     }
 
     // ── FILTER-08: exec_id ──
@@ -705,29 +946,64 @@ mod tests {
     #[test]
     fn test_exec_id_eq() {
         let record = make_record();
-        assert!(FilterBuilder::new().exec_id_eq(999).build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .exec_id_eq(999)
+                .build()
+                .matches(&record)
+        );
         assert!(!FilterBuilder::new().exec_id_eq(0).build().matches(&record));
     }
 
     #[test]
     fn test_exec_id_gt() {
         let record = make_record();
-        assert!(FilterBuilder::new().exec_id_gt(500).build().matches(&record));
-        assert!(!FilterBuilder::new().exec_id_gt(999).build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .exec_id_gt(500)
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .exec_id_gt(999)
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_exec_id_lt() {
         let record = make_record();
-        assert!(FilterBuilder::new().exec_id_lt(1000).build().matches(&record));
-        assert!(!FilterBuilder::new().exec_id_lt(999).build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .exec_id_lt(1000)
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .exec_id_lt(999)
+                .build()
+                .matches(&record)
+        );
     }
 
     #[test]
     fn test_exec_id_between() {
         let record = make_record();
-        assert!(FilterBuilder::new().exec_id_between(500, 1000).build().matches(&record));
-        assert!(!FilterBuilder::new().exec_id_between(1000, 2000).build().matches(&record));
+        assert!(
+            FilterBuilder::new()
+                .exec_id_between(500, 1000)
+                .build()
+                .matches(&record)
+        );
+        assert!(
+            !FilterBuilder::new()
+                .exec_id_between(1000, 2000)
+                .build()
+                .matches(&record)
+        );
     }
 
     // ── FILTER-09: AND 语义 ──

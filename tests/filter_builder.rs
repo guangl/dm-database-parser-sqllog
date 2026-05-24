@@ -50,7 +50,12 @@ fn test_apply_filter_multiple_conditions_and_semantics() {
     // bob + SELECT -> username 不匹配，过滤掉
     let r2 = record_line_no_metrics("2025-11-17 16:09:41.200", 0, "bob", "SELECT 2");
     // alice + INSERT -> sql 不匹配，过滤掉
-    let r3 = record_line_no_metrics("2025-11-17 16:09:41.300", 0, "alice", "INSERT INTO t VALUES(1)");
+    let r3 = record_line_no_metrics(
+        "2025-11-17 16:09:41.300",
+        0,
+        "alice",
+        "INSERT INTO t VALUES(1)",
+    );
     write!(file, "{}{}{}", r1, r2, r3).unwrap();
 
     let filter = FilterBuilder::new()
@@ -162,7 +167,13 @@ fn test_apply_filter_ts_starts_with() {
     let results: Vec<_> = parser.iter().apply_filter(filter).collect();
 
     assert_eq!(results.len(), 1);
-    assert!(results[0].as_ref().unwrap().ts.starts_with("2025-11-17 16:09:41"));
+    assert!(
+        results[0]
+            .as_ref()
+            .unwrap()
+            .ts
+            .starts_with("2025-11-17 16:09:41")
+    );
 }
 
 /// ep_between 范围过滤：闭区间 [min, max]
@@ -264,7 +275,16 @@ fn test_apply_filter_keep_errors_with_condition() {
     let ok_count = results.iter().filter(|r| r.is_ok()).count();
     assert_eq!(err_count, 1);
     assert_eq!(ok_count, 1);
-    assert_eq!(results.iter().find(|r| r.is_ok()).unwrap().as_ref().unwrap().ep, 2);
+    assert_eq!(
+        results
+            .iter()
+            .find(|r| r.is_ok())
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .ep,
+        2
+    );
 }
 
 /// Filter::matches 直接调用验证（单元行为）
