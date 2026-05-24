@@ -1,9 +1,9 @@
 [package]
 name = "dm-database-parser-sqllog"
-version = "1.1.0"
+version = "2.0.0"
 edition = "2024"
 authors = ["guangl"]
-description = "一个高性能的达梦数据库 sqllog 日志解析库，支持 LogParserBuilder 链式配置、过滤方法和直接字段访问"
+description = "一个高性能的达梦数据库 sqllog 日志解析库，支持 FilterBuilder 全字段链式过滤、AsyncLogParser tokio 异步接口和 LogParserBuilder 链式配置"
 license = "MIT"
 repository = "https://github.com/guangl/dm-database-parser-sqllog"
 documentation = "https://docs.rs/dm-database-parser-sqllog"
@@ -41,10 +41,21 @@ atoi = "2.0.0"
 memchr = "2.7.6"
 thiserror = "2.0.17"
 encoding = "0.2"
+tokio = { version = "1", features = ["rt"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "plotters"] }
 tempfile = "3.8"
+# tokio in dev-deps is unconditional — dev-deps are not exposed to crate consumers.
+# Published lib builds without --features async remain tokio-free for users.
+# Cargo does not support feature-gating dev-dependencies, so this is intentional.
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[features]
+# dep:tokio syntax (stable since Rust 1.60/Cargo 1.60) is idiomatic:
+# it enables the optional dep and automatically applies the features
+# declared in [dependencies] (features = ["rt"]) without redundancy.
+async = ["dep:tokio"]
 
 [[bench]]
 name = "parser_benchmark"

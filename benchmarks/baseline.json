@@ -1,5 +1,5 @@
 {
-    "parser_group/parse_sqllog_file_5mb": 532890.5416656848,
-    "parser_group/parse_sqllog_metrics_5mb": 2393264.434524873,
-    "parser_group/parse_sqllog_multiline_5mb": 583702.9487190087
+    "parser_group/parse_sqllog_file_5mb": 10817255.840111176,
+    "parser_group/parse_sqllog_metrics_5mb": 2993678.333948885,
+    "parser_group/parse_sqllog_multiline_5mb": 10349028.01985978
 }

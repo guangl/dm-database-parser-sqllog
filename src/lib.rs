@@ -33,14 +33,14 @@
 //!
 //! ### 示例 2：过滤慢查询
 //!
-//! 使用 `filter_by_exec_time(100)` 过滤出执行时间 >= 100ms 的慢查询。
+//! 使用 `filter_by_exec_time(100.0)` 过滤出执行时间 >= 100ms 的慢查询。
 //!
 //! ```rust,no_run
 //! use dm_database_parser_sqllog::LogParserBuilder;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let parser = LogParserBuilder::new("sqllog.txt").build()?;
-//! for record in parser.iter().filter_by_exec_time(100) {
+//! for record in parser.iter().filter_by_exec_time(100.0) {
 //!     let sqllog = record?;
 //!     println!("{}ms - {}", sqllog.exectime, sqllog.sql);
 //! }
@@ -80,11 +80,16 @@
 //! ```
 
 pub(crate) mod error;
+pub(crate) mod filter;
 pub(crate) mod parser;
-pub(crate) mod sqllog;
+pub(crate) mod record;
 
 pub use error::ParseError;
-pub use parser::{
-    FileEncodingHint, LogIterator, LogParser, LogParserBuilder, parse_record,
-};
-pub use sqllog::Sqllog;
+pub use filter::{Filter, FilterBuilder};
+pub use parser::{FileEncodingHint, LogIterator, LogParser, LogParserBuilder};
+pub use record::Sqllog;
+
+#[cfg(feature = "async")]
+pub mod async_api;
+#[cfg(feature = "async")]
+pub use async_api::{AsyncError, AsyncLogParser};

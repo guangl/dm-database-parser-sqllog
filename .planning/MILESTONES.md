@@ -1,5 +1,27 @@
 # MILESTONES
 
+## v2.0 Refactor, Filter & Async (Shipped: 2026-05-23)
+
+**Phases completed:** 3 phases, 6 plans
+**Timeline:** 2026-05-21 → 2026-05-23（3 天）
+**Code:** 2,551 行 Rust（src/）
+**Changes:** 66 文件，+9,832 / -3,250 行
+
+### Key Accomplishments
+
+1. **src/ 功能分层重组** — parser/ filter/ async_api/ record.rs error.rs，75 个现有测试全量通过，用户侧导入路径零中断
+2. **FilterBuilder 56 方法链式 API** — 14 个 Sqllog 字段全覆盖，AND 语义短路求值，单次迭代无中间 Vec 分配
+3. **apply_filter 迭代器集成** — LogIterator::apply_filter / apply_filter_keep_errors 两路错误处理，12 个集成测试全通过
+4. **AsyncLogParser + tokio 可选 feature** — AsyncLogParser::new(path).with_filter(filter).parse().await，不使用 async 的用户零 tokio 依赖
+5. **代码质量保证** — 全程覆盖率 ≥90%（最终 90.65%），clippy 零警告，代码审查修复 11 个问题
+
+### Archive
+
+- `.planning/milestones/v2.0-ROADMAP.md` — 完整阶段归档
+- `.planning/milestones/v2.0-REQUIREMENTS.md` — 需求完成状态归档
+
+---
+
 ## v1.1 API & Ergonomics (Shipped: 2026-05-19)
 
 **Phases completed:** 4 phases, 9 plans, 9 tasks

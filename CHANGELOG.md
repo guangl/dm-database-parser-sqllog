@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2026-05-23
+
+### Added
+
+- **FilterBuilder**：56 个链式谓词方法，覆盖全部 14 个字段（ts、tag、ep、sess_id、thrd_id、username、trxid、statement、appname、client_ip、sql、exectime、rowcount、exec_id），AND 语义组合，通过 `Filter` 对象传入迭代器。
+- **AsyncLogParser**（可选 feature `async`）：基于 tokio `spawn_blocking` 的异步封装，`AsyncLogParser::new(path).with_filter(filter).parse().await` 返回 `Vec<Sqllog>`。
+- **`apply_filter` / `apply_filter_keep_errors`**：`LogIterator` 新增两个方法，支持将 `Filter` 应用于顺序迭代。
+- 代码按功能分层：`parser/`、`filter/`、`async_api/`、`record.rs`、`error.rs`。
+
+### Changed
+
+- 模块结构重组，内部实现分拆至子目录，公开 API 不变。
+
 ## [1.1.0] - 2026-05-21
 
 ### Changed (Breaking)

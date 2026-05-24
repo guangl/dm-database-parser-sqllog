@@ -4,6 +4,7 @@
 
 - ✅ **v1.0 Performance Optimization** — Phases 1–5 (shipped 2026-04-26)
 - ✅ **v1.1 API & Ergonomics** — Phases 6–9 (shipped 2026-05-19)
+- ✅ **v2.0 Refactor, Filter & Async** — Phases 10–12 (shipped 2026-05-23)
 
 ## Phases
 
@@ -32,6 +33,17 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 
 </details>
 
+<details>
+<summary>✅ v2.0 Refactor, Filter & Async (Phases 10–12) — SHIPPED 2026-05-23</summary>
+
+- [x] Phase 10: Restructure (3/3 plans) — src/ 功能分层重组，75 个现有测试通过，覆盖率 94.93%
+- [x] Phase 11: FilterBuilder (2/2 plans) — 56 个链式谓词方法，14 字段全覆盖，AND 语义，12 个集成测试
+- [x] Phase 12: AsyncAPI (1/1 plan) — AsyncLogParser + tokio optional feature，覆盖率 90.65%
+
+Full details: `.planning/milestones/v2.0-ROADMAP.md`
+
+</details>
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -45,6 +57,9 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 | 7. APIErgonomics | v1.1 | 3/3 | Complete | 2026-05-19 |
 | 8. Documentation | v1.1 | 3/3 | Complete | 2026-05-19 |
 | 9. Publishing | v1.1 | 1/1 | Complete | 2026-05-19 |
+| 10. Restructure | v2.0 | 3/3 | Complete | 2026-05-22 |
+| 11. FilterBuilder | v2.0 | 2/2 | Complete | 2026-05-23 |
+| 12. AsyncAPI | v2.0 | 1/1 | Complete | 2026-05-23 |
 
 ---
-*Updated: 2026-05-19 — v1.1 milestone shipped*
+*Updated: 2026-05-23 — v2.0 milestone archived*

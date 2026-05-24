@@ -1,32 +1,6 @@
-use dm_database_parser_sqllog::{LogParserBuilder, parse_record};
+use dm_database_parser_sqllog::LogParserBuilder;
 use std::io::Write;
 use tempfile::NamedTempFile;
-
-/// parse_record with no embedded newline → hits the None branch in is_multiline=true path
-#[test]
-fn parse_record_single_line_no_newline() {
-    let raw =
-        b"2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:U trxid:3 stmt:4 appname:a) SELECT 1";
-    let rec = parse_record(raw).unwrap();
-    assert_eq!(rec.ts, "2025-11-17 16:09:41.123");
-    assert!(rec.sql.contains("SELECT"));
-}
-
-/// Record >= 23 bytes with valid timestamp but no `(` → InvalidFormat at meta_start
-#[test]
-fn parse_record_no_meta_open_paren() {
-    let raw = b"2025-11-17 16:09:41.123 NO_OPEN_PAREN_AT_ALL_HERE body";
-    let result = parse_record(raw);
-    assert!(result.is_err());
-}
-
-/// Record with `(` but no closing `)` → InvalidFormat at meta_end
-#[test]
-fn parse_record_no_meta_close_paren() {
-    let raw = b"2025-11-17 16:09:41.123 (UNCLOSED_META body";
-    let result = parse_record(raw);
-    assert!(result.is_err());
-}
 
 /// File starting with a leading newline → record_slice is empty on first iteration → continue
 #[test]

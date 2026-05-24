@@ -56,7 +56,9 @@ pub struct Sqllog {
 /// 解析元数据：从 meta 字节切片中提取所有字段。
 ///
 /// meta_bytes 必须为有效 UTF-8。
-pub(crate) fn parse_meta_from_bytes(meta_bytes: &[u8]) -> (u8, String, String, String, String, String, String, String) {
+pub(crate) fn parse_meta_from_bytes(
+    meta_bytes: &[u8],
+) -> (u8, String, String, String, String, String, String, String) {
     let mut ep: u8 = 0;
     let mut sess_id = String::new();
     let mut thrd_id = String::new();
@@ -138,7 +140,9 @@ pub(crate) fn parse_meta_from_bytes(meta_bytes: &[u8]) -> (u8, String, String, S
         }
     }
 
-    (ep, sess_id, thrd_id, username, trxid, statement, appname, client_ip)
+    (
+        ep, sess_id, thrd_id, username, trxid, statement, appname, client_ip,
+    )
 }
 
 /// 解析性能指标：从 indicators 字节切片中提取 EXECTIME, ROWCOUNT, EXEC_ID。
@@ -204,7 +208,9 @@ pub(crate) fn parse_indicators_from_bytes(ind: &[u8]) -> (f32, u32, i64) {
             let colon_pos = search_start + colon;
             if colon_pos >= 7 && &ind[colon_pos - 7..colon_pos] == b"EXEC_ID" {
                 let ss = colon_pos + 1;
-                let end = memchr(b'.', &ind[ss..]).map(|i| ss + i).unwrap_or(ind.len());
+                let end = memchr(b'.', &ind[ss..])
+                    .map(|i| ss + i)
+                    .unwrap_or(ind.len());
                 let val_bytes = &ind[ss..end];
                 let val_str = String::from_utf8_lossy(val_bytes).trim_ascii().to_string();
                 if let Ok(id) = val_str.parse::<i64>() {
@@ -252,11 +258,18 @@ pub(crate) fn find_indicators_split(data: &[u8]) -> usize {
         match memrchr(b':', &window[..search_end]) {
             None => break,
             Some(colon) => {
-                if exectime_pos.is_none() && colon >= 8 && &window[colon - 8..colon] == b"EXECTIME" {
+                if exectime_pos.is_none() && colon >= 8 && &window[colon - 8..colon] == b"EXECTIME"
+                {
                     exectime_pos = Some(colon - 8);
-                } else if rowcount_pos.is_none() && colon >= 8 && &window[colon - 8..colon] == b"ROWCOUNT" {
+                } else if rowcount_pos.is_none()
+                    && colon >= 8
+                    && &window[colon - 8..colon] == b"ROWCOUNT"
+                {
                     rowcount_pos = Some(colon - 8);
-                } else if exec_id_pos.is_none() && colon >= 7 && &window[colon - 7..colon] == b"EXEC_ID" {
+                } else if exec_id_pos.is_none()
+                    && colon >= 7
+                    && &window[colon - 7..colon] == b"EXEC_ID"
+                {
                     exec_id_pos = Some(colon - 7);
                 }
                 search_end = colon;
