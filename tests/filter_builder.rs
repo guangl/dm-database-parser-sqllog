@@ -151,50 +151,6 @@ fn test_apply_filter_keep_errors_propagates_parse_errors() {
     assert!(matches!(err_result, Err(ParseError::InvalidFormat { .. })));
 }
 
-/// ts_starts_with 前缀过滤：按时间戳前缀区分记录
-#[test]
-#[cfg(not(miri))]
-fn test_apply_filter_ts_starts_with() {
-    let mut file = NamedTempFile::new().unwrap();
-    let r1 = record_line_no_metrics("2025-11-17 16:09:41.100", 0, "alice", "SELECT 1");
-    let r2 = record_line_no_metrics("2025-11-18 09:00:00.000", 0, "alice", "SELECT 2");
-    write!(file, "{}{}", r1, r2).unwrap();
-
-    let filter = FilterBuilder::new()
-        .ts_starts_with("2025-11-17 16:09:41")
-        .build();
-    let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().apply_filter(filter).collect();
-
-    assert_eq!(results.len(), 1);
-    assert!(
-        results[0]
-            .as_ref()
-            .unwrap()
-            .ts
-            .starts_with("2025-11-17 16:09:41")
-    );
-}
-
-/// ep_between 范围过滤：闭区间 [min, max]
-#[test]
-#[cfg(not(miri))]
-fn test_apply_filter_ep_between() {
-    let mut file = NamedTempFile::new().unwrap();
-    let r1 = record_line_no_metrics("2025-11-17 16:09:41.100", 0, "alice", "SELECT 1");
-    let r2 = record_line_no_metrics("2025-11-17 16:09:41.200", 2, "alice", "SELECT 2");
-    let r3 = record_line_no_metrics("2025-11-17 16:09:41.300", 5, "alice", "SELECT 3");
-    write!(file, "{}{}{}", r1, r2, r3).unwrap();
-
-    // 只保留 ep 在 [1, 3] 内的记录（ep=2 满足，ep=0 和 ep=5 不满足）
-    let filter = FilterBuilder::new().ep_between(1, 3).build();
-    let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().apply_filter(filter).collect();
-
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].as_ref().unwrap().ep, 2);
-}
-
 /// Filter 满足 Send + Sync：跨线程传递验证（Phase 12 async 集成铺路）
 #[test]
 #[cfg(not(miri))]
@@ -259,13 +215,13 @@ fn test_apply_filter_with_skip_errors_pattern() {
 fn test_apply_filter_keep_errors_with_condition() {
     let mut file = NamedTempFile::new().unwrap();
     let invalid = "this is not a valid log record\n";
-    // ep=0，被 ep_gt(1) 过滤掉
+    // ep=0，被 ep_eq(2) 过滤掉
     let r1 = record_line_no_metrics("2025-11-17 16:09:41.100", 0, "alice", "SELECT 1");
-    // ep=2，通过 ep_gt(1)
+    // ep=2，通过 ep_eq(2)
     let r2 = record_line_no_metrics("2025-11-17 16:09:41.200", 2, "alice", "SELECT 2");
     write!(file, "{}{}{}", invalid, r1, r2).unwrap();
 
-    let filter = FilterBuilder::new().ep_gt(1).build();
+    let filter = FilterBuilder::new().ep_eq(2).build();
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
     let results: Vec<_> = parser.iter().apply_filter_keep_errors(filter).collect();
 
@@ -312,7 +268,7 @@ fn test_filter_matches_directly() {
 
     // 多条件 AND，全部满足
     let filter: Filter = FilterBuilder::new()
-        .ep_between(1, 5)
+        .ep_eq(3)
         .exec_time_gt(100.0)
         .username_eq("bob")
         .build();

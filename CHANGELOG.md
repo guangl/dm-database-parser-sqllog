@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.1] - 2026-05-31
+
+### Changed
+
+- **FilterBuilder API 精简**：移除使用率低的谓词方法，保留每个字段的核心过滤能力。
+  - 字符串元数据字段（`ts`、`tag`、`ep`、`sess_id`、`thrd_id`、`username`、`trxid`、`statement`、`appname`、`client_ip`）只保留 `_eq` 方法
+  - 数值字段（`exec_id`）只保留 `eq`；`rowcount` 保留 `eq/gt/lt`，移除 `between`
+  - `sql` 字段保持完整的 `contains/eq/starts_with/ends_with`
+  - `exec_time` 字段保持完整的 `gt/gte/lt/between`
+
+### Added
+
+- **`ts` 时间范围过滤**：新增 `ts_gt` / `ts_gte` / `ts_lt` / `ts_lte` / `ts_between`，基于字符串字典序（与 `YYYY-MM-DD HH:MM:SS.mmm` 格式时间顺序等价）。
+
 ## [2.0.0] - 2026-05-23
 
 ### Added
