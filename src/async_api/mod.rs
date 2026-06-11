@@ -59,15 +59,12 @@ impl AsyncLogParser {
 
     /// 在阻塞线程池中解析日志文件，返回所有匹配的记录。
     ///
-    /// # 注意
-    ///
-    /// 单条记录的解析错误会被**静默丢弃**，不会影响返回值的 `Ok` 状态。
-    /// `Ok(vec![])` 可能代表文件为空，也可能代表所有记录均解析失败。
-    /// 若需获知被跳过的记录数，请使用未来将提供的 `parse_strict()` API。
+    /// 行为与同步 [`LogIterator`](crate::parser::mod::LogIterator) 一致：
+    /// 任意一条记录解析失败即返回 `Err`，不会静默丢弃错误记录。
     ///
     /// # 错误
     ///
-    /// - [`AsyncError::Parse`]：文件不存在、格式错误等解析错误
+    /// - [`AsyncError::Parse`]：文件不存在、格式错误、或任意记录解析失败
     /// - [`AsyncError::Panic`]：阻塞任务内部 panic
     ///
     /// # Panics
@@ -85,11 +82,10 @@ impl AsyncLogParser {
                 .encoding_hint(encoding_hint)
                 .build()?;
             let iter = parser.iter()?;
-            let records = match filter {
-                Some(f) => iter.apply_filter(f).filter_map(Result::ok).collect(),
-                None => iter.filter_map(Result::ok).collect(),
-            };
-            Ok(records)
+            match filter {
+                Some(f) => iter.apply_filter_keep_errors(f).collect(),
+                None => iter.collect(),
+            }
         })
         .await
         .map_err(|e| AsyncError::Panic(e.to_string()))?
@@ -222,6 +218,30 @@ mod tests {
             matches!(async_err, AsyncError::Parse(_)),
             "ParseError 应转换为 AsyncError::Parse"
         );
+    }
+
+    #[cfg(not(miri))]
+    #[tokio::test]
+    async fn test_parse_error_propagates() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // 写入一条格式正确的记录，再追加一条缺少性能指标的无效记录
+        let mut tmp = NamedTempFile::new().expect("创建临时文件失败");
+        write!(
+            tmp,
+            "2025-11-17 16:09:41.123 (EP[0] sess:1 thrd:2 user:SYSDBA trxid:3 stmt:4 appname:app) SELECT 1\nEXECTIME:0.100(ms) ROWCOUNT:1(rows) EXEC_ID:1.\n\
+             2025-11-17 16:09:42.456 INVALID RECORD WITHOUT METRICS"
+        )
+        .unwrap();
+        tmp.as_file().sync_all().unwrap();
+
+        let result = AsyncLogParser::new(tmp.path()).parse().await;
+        assert!(
+            result.is_err(),
+            "含解析错误的文件应返回 Err，而非静默丢弃"
+        );
+        assert!(matches!(result, Err(AsyncError::Parse(_))));
     }
 
     #[cfg(not(miri))]
