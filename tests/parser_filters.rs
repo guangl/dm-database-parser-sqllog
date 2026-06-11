@@ -13,7 +13,7 @@ fn test_filter_by_exec_time_filters_low_exec_time() {
     write!(file, "{}{}{}", r1, r2, r3).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().filter_by_exec_time(100.0).collect();
+    let results: Vec<_> = parser.iter().unwrap().filter_by_exec_time(100.0).collect();
 
     assert_eq!(results.len(), 1);
     let record = results[0].as_ref().unwrap();
@@ -29,7 +29,7 @@ fn test_filter_by_exec_time_keeps_high_exec_time() {
     write!(file, "{}{}", r1, r2).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().filter_by_exec_time(100.0).collect();
+    let results: Vec<_> = parser.iter().unwrap().filter_by_exec_time(100.0).collect();
 
     assert_eq!(results.len(), 2);
 }
@@ -43,7 +43,7 @@ fn test_filter_by_exec_time_empty_when_all_below() {
     write!(file, "{}{}", r1, r2).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().filter_by_exec_time(100.0).collect();
+    let results: Vec<_> = parser.iter().unwrap().filter_by_exec_time(100.0).collect();
 
     assert_eq!(results.len(), 0);
 }
@@ -60,7 +60,7 @@ fn test_filter_by_sql_contains_matches() {
     write!(file, "{}{}{}", r1, r2, r3).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().filter_by_sql_contains("SELECT").collect();
+    let results: Vec<_> = parser.iter().unwrap().filter_by_sql_contains("SELECT").collect();
 
     assert_eq!(results.len(), 1);
     let record = results[0].as_ref().unwrap();
@@ -76,7 +76,7 @@ fn test_filter_by_sql_contains_empty_when_no_match() {
     write!(file, "{}{}", r1, r2).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().filter_by_sql_contains("SELECT").collect();
+    let results: Vec<_> = parser.iter().unwrap().filter_by_sql_contains("SELECT").collect();
 
     assert_eq!(results.len(), 0);
 }
@@ -90,7 +90,7 @@ fn test_filter_by_sql_contains_skips_parse_errors() {
     write!(file, "{}{}", r1, r2).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().filter_by_sql_contains("SELECT").collect();
+    let results: Vec<_> = parser.iter().unwrap().filter_by_sql_contains("SELECT").collect();
 
     assert_eq!(results.len(), 1);
     let record = results[0].as_ref().unwrap();

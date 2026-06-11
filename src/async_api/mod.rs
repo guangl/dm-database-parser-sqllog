@@ -84,7 +84,7 @@ impl AsyncLogParser {
             let parser = LogParserBuilder::new(&path)
                 .encoding_hint(encoding_hint)
                 .build()?;
-            let iter = parser.iter();
+            let iter = parser.iter()?;
             let records = match filter {
                 Some(f) => iter.apply_filter(f).filter_map(Result::ok).collect(),
                 None => iter.filter_map(Result::ok).collect(),

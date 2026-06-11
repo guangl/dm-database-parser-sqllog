@@ -1,15 +1,11 @@
-use memchr::memchr;
-use memchr::memmem::Finder;
-use std::sync::LazyLock;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 
 use crate::error::ParseError;
 use crate::filter::adapter;
 use crate::filter::builder::Filter;
 use crate::parser::encoding::FileEncodingHint;
 use crate::record::Sqllog;
-
-/// Pre-built SIMD searcher for the `"\n20"` record-start pattern.
-static FINDER_RECORD_START: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"\n20"));
 
 // ── 时间戳验证常量 ──────────────────────────────────────────────────────────────
 
@@ -30,45 +26,69 @@ fn is_timestamp_start(bytes: &[u8]) -> bool {
         && bytes[19] == b'.'
 }
 
-/// SQL 日志记录的顺序迭代器。
-pub struct LogIterator<'a> {
-    pub(super) data: &'a [u8],
-    pub(super) pos: usize,
-    pub(super) encoding: FileEncodingHint,
-    pub(super) line_number: u64,
+#[inline(always)]
+fn trailing_newline_len(s: &[u8]) -> usize {
+    if s.ends_with(b"\r\n") {
+        2
+    } else if s.ends_with(b"\n") {
+        1
+    } else {
+        0
+    }
 }
 
-impl<'a> LogIterator<'a> {
+/// SQL 日志记录的流式迭代器。
+///
+/// 内部使用 `BufReader` 逐行读取，内存峰值约等于单条最大记录的大小。
+pub struct LogIterator {
+    reader: BufReader<File>,
+    encoding: FileEncodingHint,
+    pending: Vec<u8>,
+    pending_line_number: u64,
+    next_line_number: u64,
+    line_buf: Vec<u8>,
+    done: bool,
+}
+
+impl LogIterator {
+    pub(super) fn new(file: File, encoding: FileEncodingHint) -> Self {
+        Self {
+            reader: BufReader::new(file),
+            encoding,
+            pending: Vec::new(),
+            pending_line_number: 1,
+            next_line_number: 1,
+            line_buf: Vec::new(),
+            done: false,
+        }
+    }
+
     /// 返回一个跳过解析错误的迭代器。
-    pub fn skip_errors(self) -> impl Iterator<Item = Sqllog> + 'a {
+    pub fn skip_errors(self) -> impl Iterator<Item = Sqllog> {
         self.filter_map(Result::ok)
     }
 
     /// 过滤出执行时间大于等于 `min_ms` 毫秒的记录。
-    ///
-    /// 解析错误在迭代过程中**静默丢弃**。若需保留错误，请使用 [`apply_filter_keep_errors`]。
     pub fn filter_by_exec_time(
         self,
         min_ms: f32,
-    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
+    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> {
         adapter::filter_by_exec_time(self, min_ms)
     }
 
     /// 过滤出 SQL 语句体包含指定 `pattern` 的记录。
-    ///
-    /// 解析错误在迭代过程中**静默丢弃**。若需保留错误，请使用 [`apply_filter_keep_errors`]。
     pub fn filter_by_sql_contains(
         self,
         pattern: &str,
-    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
+    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> {
         adapter::filter_by_sql_contains(self, pattern)
     }
 
-    /// 应用 FilterBuilder 产出的组合过滤器，错误记录被丢弃（与 filter_by_exec_time 一致）。
+    /// 应用 FilterBuilder 产出的组合过滤器，错误记录被丢弃。
     pub fn apply_filter(
         self,
         filter: Filter,
-    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
+    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> {
         adapter::apply_filter(self, filter)
     }
 
@@ -76,72 +96,85 @@ impl<'a> LogIterator<'a> {
     pub fn apply_filter_keep_errors(
         self,
         filter: Filter,
-    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> + 'a {
+    ) -> impl Iterator<Item = Result<Sqllog, ParseError>> {
         adapter::apply_filter_keep_errors(self, filter)
     }
 }
 
-impl<'a> Iterator for LogIterator<'a> {
+impl Iterator for LogIterator {
     type Item = Result<Sqllog, ParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.pos >= self.data.len() {
+            if self.done {
                 return None;
             }
 
-            let data = &self.data[self.pos..];
-            let current_line = self.line_number;
-
-            let (record_end, next_start) = match memchr(b'\n', data) {
-                None => (data.len(), data.len()),
-                Some(first_nl) => {
-                    let ts_start = first_nl + 1;
-                    if ts_start + 23 <= data.len()
-                        && is_timestamp_start(&data[ts_start..ts_start + 23])
-                    {
-                        (first_nl, ts_start)
-                    } else {
-                        // 多行记录：用 memmem 跳过嵌入换行继续搜索
-                        let mut found_boundary: Option<usize> = None;
-                        for candidate in FINDER_RECORD_START.find_iter(&data[ts_start..]) {
-                            let abs_ts = ts_start + candidate + 1;
-                            if abs_ts + 23 <= data.len()
-                                && is_timestamp_start(&data[abs_ts..abs_ts + 23])
-                            {
-                                found_boundary = Some(ts_start + candidate);
-                                break;
-                            }
-                        }
-                        match found_boundary {
-                            Some(idx) => (idx, idx + 1),
-                            None => (data.len(), data.len()),
-                        }
-                    }
+            self.line_buf.clear();
+            let bytes_read = match self.reader.read_until(b'\n', &mut self.line_buf) {
+                Ok(n) => n,
+                Err(e) => {
+                    self.done = true;
+                    return Some(Err(ParseError::IoError(e.to_string())));
                 }
             };
 
-            let record_slice = &data[..record_end];
-            self.pos += next_start;
-
-            self.line_number += data[..next_start].iter().filter(|&&b| b == b'\n').count() as u64;
-
-            // Trim trailing CR
-            let record_slice = if record_slice.ends_with(b"\r") {
-                &record_slice[..record_slice.len() - 1]
-            } else {
-                record_slice
-            };
-
-            if record_slice.is_empty() {
-                continue;
+            if bytes_read == 0 {
+                self.done = true;
+                if self.pending.is_empty() {
+                    return None;
+                }
+                let trim = trailing_newline_len(&self.pending);
+                let end = self.pending.len() - trim;
+                if end == 0 {
+                    return None;
+                }
+                return Some(super::parse_record_with_hint(
+                    &self.pending[..end],
+                    self.encoding,
+                    self.pending_line_number,
+                ));
             }
 
-            return Some(super::parse_record_with_hint(
-                record_slice,
-                self.encoding,
-                current_line,
-            ));
+            let current_line = self.next_line_number;
+            self.next_line_number += 1;
+
+            let is_new_record =
+                self.line_buf.len() >= 23 && is_timestamp_start(&self.line_buf);
+
+            if is_new_record && !self.pending.is_empty() {
+                let trim = trailing_newline_len(&self.pending);
+                let end = self.pending.len() - trim;
+
+                if end == 0 {
+                    // blank line between records — skip silently
+                    self.pending.clear();
+                    self.pending_line_number = current_line;
+                    self.pending.extend_from_slice(&self.line_buf);
+                    continue;
+                }
+
+                let result = super::parse_record_with_hint(
+                    &self.pending[..end],
+                    self.encoding,
+                    self.pending_line_number,
+                );
+                self.pending.clear();
+                self.pending_line_number = current_line;
+                self.pending.extend_from_slice(&self.line_buf);
+                return Some(result);
+            }
+
+            if is_new_record {
+                self.pending_line_number = current_line;
+                self.pending.extend_from_slice(&self.line_buf);
+            } else if !self.pending.is_empty() {
+                self.pending.extend_from_slice(&self.line_buf);
+            } else {
+                // non-record line before any record start: buffer as a (likely invalid) record
+                self.pending_line_number = current_line;
+                self.pending.extend_from_slice(&self.line_buf);
+            }
         }
     }
 }

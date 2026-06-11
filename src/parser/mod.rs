@@ -8,6 +8,8 @@ pub use iterator::LogIterator;
 
 use memchr::memmem::Finder;
 use memchr::{memchr, memrchr};
+use std::fs::File;
+use std::path::PathBuf;
 use std::str;
 use std::sync::LazyLock;
 
@@ -21,22 +23,18 @@ static FINDER_CLOSE_META: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::n
 
 /// SQL 日志文件解析器。
 ///
-/// 通过 [`LogParserBuilder`] 构建实例。内部将整个文件读入内存，
-/// 自动检测文件编码（UTF-8 或 GB18030）。
+/// 通过 [`LogParserBuilder`] 构建实例。每次调用 [`iter`](LogParser::iter) 时
+/// 打开文件并以流式方式逐行读取，内存占用与文件大小无关。
 pub struct LogParser {
-    pub(super) data: Vec<u8>,
+    pub(super) path: PathBuf,
     pub(super) encoding: FileEncodingHint,
 }
 
 impl LogParser {
-    /// 返回顺序迭代器。
-    pub fn iter(&self) -> LogIterator<'_> {
-        LogIterator {
-            data: &self.data,
-            pos: 0,
-            encoding: self.encoding,
-            line_number: 1,
-        }
+    /// 打开文件并返回流式迭代器。
+    pub fn iter(&self) -> Result<LogIterator, ParseError> {
+        let file = File::open(&self.path).map_err(|e| ParseError::IoError(e.to_string()))?;
+        Ok(LogIterator::new(file, self.encoding))
     }
 }
 
@@ -264,7 +262,7 @@ mod tests {
             .encoding_hint(FileEncodingHint::Utf8)
             .build()
             .expect("build");
-        let record = parser.iter().next().unwrap().unwrap();
+        let record = parser.iter().unwrap().next().unwrap().unwrap();
         assert_eq!(record.ts, "2025-11-17 16:09:41.123");
         assert!(record.sql.contains("SELECT 1"));
     }
@@ -603,7 +601,7 @@ mod tests {
         tmp.as_file().sync_all().expect("sync");
 
         let parser = LogParserBuilder::new(tmp.path()).build().expect("open");
-        let rec = parser.iter().next().unwrap().unwrap();
+        let rec = parser.iter().unwrap().next().unwrap().unwrap();
         assert_eq!(rec.username, username);
     }
 
@@ -674,7 +672,7 @@ mod tests {
         tmp.as_file().sync_all().unwrap();
 
         let parser = LogParserBuilder::new(tmp.path()).build().unwrap();
-        let records: Vec<_> = parser.iter().collect();
+        let records: Vec<_> = parser.iter().unwrap().collect();
         let last = records.last().unwrap().as_ref().unwrap();
         assert_eq!(last.username, username);
     }
@@ -698,7 +696,7 @@ mod tests {
         tmp.as_file().sync_all().expect("sync");
 
         let parser = LogParserBuilder::new(tmp.path()).build().expect("open");
-        let rec = parser.iter().next().unwrap().unwrap();
+        let rec = parser.iter().unwrap().next().unwrap().unwrap();
         assert_eq!(rec.username, username);
     }
 

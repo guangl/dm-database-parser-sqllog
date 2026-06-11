@@ -22,7 +22,7 @@
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let parser = LogParserBuilder::new("sqllog.txt").build()?;
-//! for result in parser.iter() {
+//! for result in parser.iter()? {
 //!     let record = result?;
 //!     println!("时间戳: {}", record.ts);
 //!     println!("SQL: {}", record.sql);
@@ -40,7 +40,7 @@
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let parser = LogParserBuilder::new("sqllog.txt").build()?;
-//! for record in parser.iter().filter_by_exec_time(100.0) {
+//! for record in parser.iter()?.filter_by_exec_time(100.0) {
 //!     let sqllog = record?;
 //!     println!("{}ms - {}", sqllog.exectime, sqllog.sql);
 //! }
@@ -57,7 +57,7 @@
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let parser = LogParserBuilder::new("sqllog.txt").build()?;
-//! let records: Vec<_> = parser.iter().filter_map(|r| r.ok()).collect();
+//! let records: Vec<_> = parser.iter()?.filter_map(|r| r.ok()).collect();
 //! for sqllog in &records {
 //!     println!("{} | {} | {}", sqllog.ts, sqllog.username, sqllog.sql);
 //! }

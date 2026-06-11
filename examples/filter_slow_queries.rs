@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let parser = dm_database_parser_sqllog::LogParserBuilder::new(&path).build()?;
 
-    for result in parser.iter().filter_by_exec_time(100.0) {
+    for result in parser.iter().unwrap().filter_by_exec_time(100.0) {
         let record = result?;
         println!("{} | {}ms | {}", record.ts, record.exectime, record.sql);
     }

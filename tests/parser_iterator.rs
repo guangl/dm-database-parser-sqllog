@@ -12,7 +12,7 @@ fn iterator_handles_crlf_and_eof_without_newline() {
     write!(file, "{}{}", rec1, rec2_no_nl).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let mut it = parser.iter();
+    let mut it = parser.iter().unwrap();
 
     let r1 = it.next().unwrap().unwrap();
     assert_eq!(r1.ts, "2025-11-17 16:09:41.123");
@@ -33,7 +33,7 @@ fn iterator_multiline_detection() {
     file.write_all(content.as_bytes()).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let mut it = parser.iter();
+    let mut it = parser.iter().unwrap();
     let r = it.next().unwrap().unwrap();
     assert!(r.sql.contains("FROM dual"));
     assert_eq!(r.rowcount, 1);
