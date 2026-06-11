@@ -34,7 +34,7 @@ fn test_apply_filter_single_condition_exec_time() {
 
     let filter = FilterBuilder::new().exec_time_gt(100.0).build();
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().apply_filter(filter).collect();
+    let results: Vec<_> = parser.iter().unwrap().apply_filter(filter).collect();
 
     assert_eq!(results.len(), 1);
     assert!(results[0].as_ref().unwrap().sql.contains("SELECT 2"));
@@ -63,7 +63,7 @@ fn test_apply_filter_multiple_conditions_and_semantics() {
         .sql_contains("SELECT")
         .build();
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().apply_filter(filter).collect();
+    let results: Vec<_> = parser.iter().unwrap().apply_filter(filter).collect();
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].as_ref().unwrap().username, "alice");
@@ -81,7 +81,7 @@ fn test_apply_filter_empty_filter_matches_all() {
 
     let filter = FilterBuilder::new().build();
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().apply_filter(filter).collect();
+    let results: Vec<_> = parser.iter().unwrap().apply_filter(filter).collect();
 
     assert_eq!(results.len(), 2);
 }
@@ -98,7 +98,7 @@ fn test_apply_filter_no_match_returns_empty() {
     // username_eq("nonexistent") 不会匹配任何记录
     let filter = FilterBuilder::new().username_eq("nonexistent").build();
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().apply_filter(filter).collect();
+    let results: Vec<_> = parser.iter().unwrap().apply_filter(filter).collect();
 
     assert_eq!(results.len(), 0);
 }
@@ -116,7 +116,7 @@ fn test_apply_filter_drops_parse_errors() {
     // 空 filter 保留所有有效记录，Err 被丢弃
     let filter = FilterBuilder::new().build();
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().apply_filter(filter).collect();
+    let results: Vec<_> = parser.iter().unwrap().apply_filter(filter).collect();
 
     // 只有 1 条有效记录，错误被丢弃
     assert_eq!(results.len(), 1);
@@ -137,7 +137,7 @@ fn test_apply_filter_keep_errors_propagates_parse_errors() {
 
     let filter = FilterBuilder::new().build();
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().apply_filter_keep_errors(filter).collect();
+    let results: Vec<_> = parser.iter().unwrap().apply_filter_keep_errors(filter).collect();
 
     // 1 个 Err + 1 个 Ok（通过 filter 的有效记录）
     assert_eq!(results.len(), 2);
@@ -201,6 +201,7 @@ fn test_apply_filter_with_skip_errors_pattern() {
     // 链式：apply_filter + filter_map(Result::ok) 产生 Vec<Sqllog>
     let records: Vec<dm_database_parser_sqllog::Sqllog> = parser
         .iter()
+        .unwrap()
         .apply_filter(filter)
         .filter_map(|r| r.ok())
         .collect();
@@ -223,7 +224,7 @@ fn test_apply_filter_keep_errors_with_condition() {
 
     let filter = FilterBuilder::new().ep_eq(2).build();
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let results: Vec<_> = parser.iter().apply_filter_keep_errors(filter).collect();
+    let results: Vec<_> = parser.iter().unwrap().apply_filter_keep_errors(filter).collect();
 
     // Err（1 条）+ Ok 满足条件（1 条 ep=2），ep=0 的 Ok 被 filter 丢弃
     assert_eq!(results.len(), 2);

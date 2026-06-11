@@ -50,7 +50,7 @@ fn benchmark_parser(c: &mut Criterion) {
         group.bench_function("parse_sqllog_file_full", |b| {
             b.iter(|| {
                 let parser = LogParserBuilder::new(&real_path).build().unwrap();
-                let count = parser.iter().count();
+                let count = parser.iter().unwrap().count();
                 criterion::black_box(count);
             })
         });
@@ -64,20 +64,20 @@ fn benchmark_parser(c: &mut Criterion) {
     group.bench_function("parse_sqllog_file_5mb", |b| {
         b.iter(|| {
             let parser = LogParserBuilder::new(&tmp_path).build().unwrap();
-            let count = parser.iter().count();
+            let count = parser.iter().unwrap().count();
             criterion::black_box(count);
         })
     });
 
     let record_count_single = {
         let parser = LogParserBuilder::new(&tmp_path).build().unwrap();
-        parser.iter().filter_map(|r| r.ok()).count() as u64
+        parser.iter().unwrap().filter_map(|r| r.ok()).count() as u64
     };
     group.throughput(criterion::Throughput::Elements(record_count_single));
     group.bench_function("parse_sqllog_file_5mb_rps", |b| {
         b.iter(|| {
             let parser = LogParserBuilder::new(&tmp_path).build().unwrap();
-            criterion::black_box(parser.iter().count())
+            criterion::black_box(parser.iter().unwrap().count())
         })
     });
 
@@ -88,19 +88,19 @@ fn benchmark_parser(c: &mut Criterion) {
     group.bench_function("parse_sqllog_multiline_5mb", |b| {
         b.iter(|| {
             let parser = LogParserBuilder::new(&tmp_multiline_path).build().unwrap();
-            criterion::black_box(parser.iter().count())
+            criterion::black_box(parser.iter().unwrap().count())
         })
     });
 
     let record_count_multi = {
         let parser = LogParserBuilder::new(&tmp_multiline_path).build().unwrap();
-        parser.iter().filter_map(|r| r.ok()).count() as u64
+        parser.iter().unwrap().filter_map(|r| r.ok()).count() as u64
     };
     group.throughput(criterion::Throughput::Elements(record_count_multi));
     group.bench_function("parse_sqllog_multiline_5mb_rps", |b| {
         b.iter(|| {
             let parser = LogParserBuilder::new(&tmp_multiline_path).build().unwrap();
-            criterion::black_box(parser.iter().count())
+            criterion::black_box(parser.iter().unwrap().count())
         })
     });
 

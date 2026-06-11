@@ -1,6 +1,6 @@
 [package]
 name = "dm-database-parser-sqllog"
-version = "2.0.2"
+version = "2.0.3"
 edition = "2024"
 authors = ["guangl"]
 description = "一个高性能的达梦数据库 sqllog 日志解析库，支持 FilterBuilder 全字段链式过滤、AsyncLogParser tokio 异步接口和 LogParserBuilder 链式配置"

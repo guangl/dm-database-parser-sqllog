@@ -21,7 +21,7 @@ fn bench_iter(path: &str) -> Vec<Duration> {
     for _ in 0..BENCH_ITERS {
         let parser = LogParserBuilder::new(path).build().expect("open file");
         let start = Instant::now();
-        let count: usize = parser.iter().filter(|r| r.is_ok()).count();
+        let count: usize = parser.iter().unwrap().filter(|r| r.is_ok()).count();
         let elapsed = start.elapsed();
         durations.push(elapsed);
         std::hint::black_box(count);
@@ -74,7 +74,7 @@ fn main() {
     println!("\nWarm-up ({WARMUP_ITERS} iterations)…");
     for _ in 0..WARMUP_ITERS {
         let parser = LogParserBuilder::new(&tmp).build().expect("open");
-        std::hint::black_box(parser.iter().count());
+        std::hint::black_box(parser.iter().unwrap().count());
     }
 
     println!("\nBenchmarking ({BENCH_ITERS} iterations)…\n");

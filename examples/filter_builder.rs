@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parser = LogParserBuilder::new(&path).build()?;
     let mut count = 0usize;
 
-    for result in parser.iter().apply_filter(filter) {
+    for result in parser.iter().unwrap().apply_filter(filter) {
         let record = result?;
         println!(
             "{} | ep={} | {}ms | {}",

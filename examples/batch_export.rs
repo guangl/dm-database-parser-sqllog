@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("timestamp,username,sql,exec_time_ms");
 
-    for result in parser.iter() {
+    for result in parser.iter().unwrap() {
         let record = result?;
 
         let ts = &record.ts;

@@ -11,7 +11,7 @@ fn iterator_skips_leading_blank_line() {
     file.write_all(content.as_bytes()).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let records: Vec<_> = parser.iter().filter_map(|r| r.ok()).collect();
+    let records: Vec<_> = parser.iter().unwrap().filter_map(|r| r.ok()).collect();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].ts, "2025-11-17 16:09:41.123");
 }
@@ -30,7 +30,7 @@ fn crlf_in_multiline_first_line() {
     file.write_all(content.as_bytes()).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let records: Vec<_> = parser.iter().filter_map(|r| r.ok()).collect();
+    let records: Vec<_> = parser.iter().unwrap().filter_map(|r| r.ok()).collect();
     assert_eq!(records.len(), 2);
     assert_eq!(records[0].ts, "2025-11-17 16:09:41.123");
     assert_eq!(records[1].ts, "2025-11-17 16:09:42.000");

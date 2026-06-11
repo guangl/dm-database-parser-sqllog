@@ -11,7 +11,7 @@ fn iterator_yields_error_for_invalid_first_line_then_ok() {
     write!(file, "{}{}", bad, good).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let mut it = parser.iter();
+    let mut it = parser.iter().unwrap();
     let r1 = it.next().unwrap();
     assert!(r1.is_err());
     let r2 = it.next().unwrap();
@@ -27,7 +27,7 @@ fn iterator_skips_empty_record_slice_between_valid_records() {
     write!(file, "{}\n{}", r1, r2).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let v: Vec<_> = parser.iter().collect();
+    let v: Vec<_> = parser.iter().unwrap().collect();
     assert_eq!(v.len(), 2);
     assert!(v[0].as_ref().unwrap().sql.contains("A"));
     assert!(v[1].as_ref().unwrap().sql.contains("B"));
@@ -45,7 +45,7 @@ fn test_skip_errors_filters_invalid_records() {
     write!(file, "{}{}{}", valid_a, invalid, valid_b).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let v: Vec<_> = parser.iter().skip_errors().collect();
+    let v: Vec<_> = parser.iter().unwrap().skip_errors().collect();
 
     assert_eq!(v.len(), 2);
     assert!(v[0].sql.contains("VALID_A"));
@@ -63,7 +63,7 @@ fn test_error_contains_correct_line_number() {
     write!(file, "{}{}{}", good, bad, trailing_good).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let mut it = parser.iter();
+    let mut it = parser.iter().unwrap();
 
     let r1 = it.next().unwrap();
     assert!(r1.is_ok());
@@ -90,7 +90,7 @@ fn test_line_number_after_multiple_valid_records() {
     write!(file, "{}{}{}{}{}", r1, r2, r3, bad, trailing_good).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let mut it = parser.iter();
+    let mut it = parser.iter().unwrap();
 
     assert!(it.next().unwrap().is_ok());
     assert!(it.next().unwrap().is_ok());
@@ -145,7 +145,7 @@ fn test_line_number_with_multiline_record() {
     file.write_all(content.as_bytes()).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let mut it = parser.iter();
+    let mut it = parser.iter().unwrap();
 
     let r1 = it.next().unwrap();
     assert!(r1.is_ok());

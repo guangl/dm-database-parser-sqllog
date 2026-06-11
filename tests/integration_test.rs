@@ -10,7 +10,7 @@ fn test_parser() {
     file.write_all(log_content.as_bytes()).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let mut iter = parser.iter();
+    let mut iter = parser.iter().unwrap();
 
     let record = iter.next().unwrap().unwrap();
 
@@ -29,7 +29,7 @@ fn test_parser_multiline() {
     file.write_all(log_content.as_bytes()).unwrap();
 
     let parser = LogParserBuilder::new(file.path()).build().unwrap();
-    let mut iter = parser.iter();
+    let mut iter = parser.iter().unwrap();
 
     let record = iter.next().unwrap().unwrap();
 
