@@ -1,5 +1,6 @@
 use atoi::atoi;
 use memchr::memchr;
+use memchr::memchr2;
 use memchr::memrchr;
 
 /// SQL 日志记录
@@ -51,6 +52,31 @@ pub struct Sqllog {
 
     /// 执行 ID，无指标时为 0
     pub exec_id: i64,
+
+    /// 事务锁事件（LOCK_TID 日志条目），非锁行为 None
+    pub lock_event: Option<LockEvent>,
+}
+
+/// 事务锁事件
+///
+/// 对应达梦 SQL 日志中的 `LOCK_TID` 锁等待条目。三种格式：
+/// - 单阻塞: `trx[N] LOCK_TID (mode:M, table id:T, tid[K]) wait used time:X(ms|us)`
+/// - 多阻塞: `trx[N] LOCK_TID (mode:M, table id:T) wait for K trxs, trx[a, b, ...more] used time:X(ms|us)`
+/// - legacy: `trx[N] wait for LOCK_TID (mode:M, table id:T, tid[a, b]) used time:X(ms|us)`
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LockEvent {
+    /// 等待者事务 ID（`trx[N]` 中的 N）
+    pub waiting_trx_id: u64,
+    /// 阻塞者事务 ID 列表（`tid[...]` 或 `trx[...]` 中的数字）
+    pub blocking_trx_ids: Vec<u64>,
+    /// 锁模式（`mode:M`，如 S / X）
+    pub lock_mode: String,
+    /// 锁定的表 ID（`table id:T`）
+    pub table_id: u64,
+    /// 等待时长，统一为微秒（`(ms)` 时 ×1000，`(us)` 时原样）
+    pub wait_time_us: u64,
+    /// 阻塞者列表是否被 `...more` 截断
+    pub has_more_blocking: bool,
 }
 
 /// 解析元数据：从 meta 字节切片中提取所有字段。
@@ -293,5 +319,251 @@ pub(crate) fn find_indicators_split(data: &[u8]) -> usize {
             }
         }
         None => len,
+    }
+}
+
+// ── 事务锁事件解析（memchr 定位 + 定界符解析，零正则）──────────────────────────
+
+/// 跳过前导 ASCII 空格。
+#[inline]
+fn skip_ascii_spaces(mut s: &[u8]) -> &[u8] {
+    while s.first() == Some(&b' ') {
+        s = &s[1..];
+    }
+    s
+}
+
+/// 取到第一个 `,` 或 `)` 为止；返回 `(字段, 定界符及之后)`。
+#[inline]
+fn split_at_comma_or_paren(s: &[u8]) -> (&[u8], &[u8]) {
+    match memchr2(b',', b')', s) {
+        Some(i) => (&s[..i], &s[i..]),
+        None => (s, &[]),
+    }
+}
+
+/// 解析方括号内逗号分隔的数字列表（如 `tid[456, 789]` 或 `trx[1, 2]`）。
+///
+/// 支持 `...more` 截断标记。返回是否包含 `...more`。
+fn parse_id_list(bytes: &[u8], out: &mut Vec<u64>) -> Option<bool> {
+    let mut has_more = false;
+    for part in bytes.split(|&b| b == b',') {
+        let part = part.trim_ascii();
+        if part == b"...more" {
+            has_more = true;
+        } else if !part.is_empty() {
+            out.push(atoi::<u64>(part)?);
+        }
+    }
+    Some(has_more)
+}
+
+/// 从 SQL body 字节中解析事务锁事件。
+///
+/// 输入为 `trx[...]` 开头的锁行 body（不含时间戳与元数据）。支持三种格式：
+/// - 单阻塞:  `trx[N] LOCK_TID (mode:M, table id:T, tid[K]) wait used time:X(ms|us)`
+/// - 多阻塞:  `trx[N] LOCK_TID (mode:M, table id:T) wait for K trxs, trx[a, b, ...more] used time:X(ms|us)`
+/// - legacy:  `trx[N] wait for LOCK_TID (mode:M, table id:T, tid[a, b]) used time:X(ms|us)`
+///
+/// 返回 `None` 表示不是可识别的锁行。
+pub(crate) fn parse_lock_event_from_bytes(body: &[u8]) -> Option<LockEvent> {
+    let mut event = LockEvent::default();
+    let mut rest = body;
+
+    // ── S0: `trx[N]` 等待者 ──
+    rest = rest.strip_prefix(b"trx[")?;
+    let close = memchr(b']', rest)?;
+    event.waiting_trx_id = atoi::<u64>(&rest[..close])?;
+    rest = skip_ascii_spaces(&rest[close + 1..]);
+
+    // ── S1: `LOCK_TID` 定位（legacy 前有 `wait for `）──
+    let is_legacy = rest.starts_with(b"wait for ");
+    if is_legacy {
+        rest = rest.strip_prefix(b"wait for ")?;
+    }
+    rest = rest.strip_prefix(b"LOCK_TID")?;
+    rest = skip_ascii_spaces(rest);
+
+    // ── S2: `(mode:M, table id:T[, tid[...]])` ──
+    rest = rest.strip_prefix(b"(")?;
+    rest = rest.strip_prefix(b"mode:")?;
+    let (mode, r) = split_at_comma_or_paren(rest);
+    event.lock_mode = String::from_utf8_lossy(mode.trim_ascii()).into_owned();
+    rest = skip_ascii_spaces(r);
+    rest = rest.strip_prefix(b",")?;
+    rest = skip_ascii_spaces(rest);
+    rest = rest.strip_prefix(b"table id:")?;
+    let (table_id, r) = split_at_comma_or_paren(rest);
+    event.table_id = atoi::<u64>(table_id.trim_ascii())?;
+    rest = skip_ascii_spaces(r);
+
+    // 可选的括号内 `tid[...]`（单阻塞 / legacy 的阻塞者列表）
+    if let Some(r) = rest.strip_prefix(b",") {
+        rest = skip_ascii_spaces(r);
+        rest = rest.strip_prefix(b"tid[")?;
+        let close = memchr(b']', rest)?;
+        if let Some(has_more) = parse_id_list(&rest[..close], &mut event.blocking_trx_ids) {
+            event.has_more_blocking = has_more;
+        }
+        rest = skip_ascii_spaces(&rest[close + 1..]);
+    }
+    rest = rest.strip_prefix(b")")?;
+    rest = skip_ascii_spaces(rest);
+
+    // ── S3: 括号后分支 ──
+    if is_legacy {
+        // legacy: `used time:X(ms|us)`
+        rest = rest.strip_prefix(b"used time:")?;
+    } else if let Some(r) = rest.strip_prefix(b"wait for ") {
+        // 多阻塞: `wait for K trxs, trx[a, b, ...more] used time:X(ms|us)`
+        let digits = r.iter().take_while(|&&b| b.is_ascii_digit()).count();
+        let r = &r[digits..];
+        rest = r.strip_prefix(b" trxs, trx[")?;
+        let close = memchr(b']', rest)?;
+        if let Some(has_more) = parse_id_list(&rest[..close], &mut event.blocking_trx_ids) {
+            event.has_more_blocking = has_more;
+        }
+        rest = skip_ascii_spaces(&rest[close + 1..]);
+        rest = rest.strip_prefix(b"used time:")?;
+    } else {
+        // 单阻塞: `wait used time:X(ms|us)`
+        rest = rest.strip_prefix(b"wait used time:")?;
+    }
+
+    // ── S4: 等待时长（统一微秒，`(ms)` ×1000，`(us)` 原样）──
+    let digits = rest.iter().take_while(|&&b| b.is_ascii_digit()).count();
+    if digits == 0 {
+        return None;
+    }
+    let time_val = atoi::<u64>(&rest[..digits])?;
+    let unit = &rest[digits..];
+    if unit.starts_with(b"(ms)") {
+        event.wait_time_us = time_val * 1000;
+    } else if unit.starts_with(b"(us)") {
+        event.wait_time_us = time_val;
+    } else {
+        return None;
+    }
+
+    Some(event)
+}
+
+// ── 测试 ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_event(body: &str, expected: LockEvent) {
+        let event = parse_lock_event_from_bytes(body.as_bytes());
+        assert_eq!(event, Some(expected), "body: {body}");
+    }
+
+    #[test]
+    fn single_block_format() {
+        // 单阻塞：括号内 tid[K]，时间前缀 `wait used time:`
+        assert_event(
+            "trx[123] LOCK_TID (mode:S, table id:42, tid[456]) wait used time:500(ms)",
+            LockEvent {
+                waiting_trx_id: 123,
+                blocking_trx_ids: vec![456],
+                lock_mode: "S".into(),
+                table_id: 42,
+                wait_time_us: 500_000,
+                has_more_blocking: false,
+            },
+        );
+    }
+
+    #[test]
+    fn single_block_format_us_unit() {
+        // 微秒单位原样保留
+        assert_event(
+            "trx[123] LOCK_TID (mode:S, table id:42, tid[456]) wait used time:800(us)",
+            LockEvent {
+                waiting_trx_id: 123,
+                blocking_trx_ids: vec![456],
+                lock_mode: "S".into(),
+                table_id: 42,
+                wait_time_us: 800,
+                has_more_blocking: false,
+            },
+        );
+    }
+
+    #[test]
+    fn multi_block_format() {
+        // 多阻塞：括号内无 tid，阻塞者在括号后 trx[...] 中，含 ...more
+        assert_event(
+            "trx[123] LOCK_TID (mode:S, table id:42) wait for 3 trxs, trx[456, 789, ...more] used time:500(ms)",
+            LockEvent {
+                waiting_trx_id: 123,
+                blocking_trx_ids: vec![456, 789],
+                lock_mode: "S".into(),
+                table_id: 42,
+                wait_time_us: 500_000,
+                has_more_blocking: true,
+            },
+        );
+    }
+
+    #[test]
+    fn multi_block_format_no_more() {
+        // 多阻塞无截断
+        assert_event(
+            "trx[123] LOCK_TID (mode:X, table id:7) wait for 2 trxs, trx[456, 789] used time:300(ms)",
+            LockEvent {
+                waiting_trx_id: 123,
+                blocking_trx_ids: vec![456, 789],
+                lock_mode: "X".into(),
+                table_id: 7,
+                wait_time_us: 300_000,
+                has_more_blocking: false,
+            },
+        );
+    }
+
+    #[test]
+    fn legacy_format() {
+        // legacy：`wait for LOCK_TID`，括号内 tid[a, b]，时间前缀 `used time:`
+        assert_event(
+            "trx[123] wait for LOCK_TID (mode:S, table id:42, tid[456, 789]) used time:900(ms)",
+            LockEvent {
+                waiting_trx_id: 123,
+                blocking_trx_ids: vec![456, 789],
+                lock_mode: "S".into(),
+                table_id: 42,
+                wait_time_us: 900_000,
+                has_more_blocking: false,
+            },
+        );
+    }
+
+    #[test]
+    fn not_a_lock_line() {
+        // 非锁行：不以 trx[ 开头 → None
+        assert_eq!(parse_lock_event_from_bytes(b"SELECT 1"), None);
+        // 以 trx[ 开头但缺 LOCK_TID → None
+        assert_eq!(parse_lock_event_from_bytes(b"trx[1] some other content"), None);
+        // LOCK_TID 但无括号结构 → None
+        assert_eq!(parse_lock_event_from_bytes(b"trx[1] LOCK_TID garbage"), None);
+        // 空输入
+        assert_eq!(parse_lock_event_from_bytes(b""), None);
+    }
+
+    #[test]
+    fn wait_used_time_without_tid_in_paren() {
+        // 单阻塞但括号内缺少 tid 字段（部分格式变体）→ 仍可解析，阻塞列表为空
+        assert_event(
+            "trx[123] LOCK_TID (mode:S, table id:42) wait used time:100(ms)",
+            LockEvent {
+                waiting_trx_id: 123,
+                blocking_trx_ids: vec![],
+                lock_mode: "S".into(),
+                table_id: 42,
+                wait_time_us: 100_000,
+                has_more_blocking: false,
+            },
+        );
     }
 }

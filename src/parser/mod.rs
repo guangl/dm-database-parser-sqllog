@@ -21,6 +21,9 @@ use ::encoding::{DecoderTrap, Encoding};
 /// Pre-built SIMD searcher for the `") "` meta-close pattern.
 static FINDER_CLOSE_META: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b") "));
 
+/// Pre-built SIMD searcher for the `LOCK_TID` lock-entry keyword.
+static FINDER_LOCK_TID: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(b"LOCK_TID"));
+
 /// SQL 日志文件解析器。
 ///
 /// 通过 [`LogParserBuilder`] 构建实例。每次调用 [`iter`](LogParser::iter) 时
@@ -186,6 +189,15 @@ pub(super) fn parse_record_with_hint(
     let body_bytes = &content_slice[..split];
     let ind_bytes = &content_slice[split..];
 
+    // 检测事务锁事件：body 以 `trx[` 开头且含 `LOCK_TID` 关键字时解析，
+    // 普通 SQL 记录保持 None。
+    let lock_event = if body_bytes.starts_with(b"trx[") && FINDER_LOCK_TID.find(body_bytes).is_some()
+    {
+        record::parse_lock_event_from_bytes(body_bytes)
+    } else {
+        None
+    };
+
     // 解码 body
     let sql_raw = match encoding_hint {
         FileEncodingHint::Utf8 => String::from_utf8_lossy(body_bytes).into_owned(),
@@ -227,6 +239,7 @@ pub(super) fn parse_record_with_hint(
         exectime,
         rowcount,
         exec_id,
+        lock_event,
     })
 }
 

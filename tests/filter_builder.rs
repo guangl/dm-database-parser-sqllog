@@ -178,6 +178,7 @@ fn test_filter_send_sync_across_threads() {
         exectime: 150.0,
         rowcount: 1,
         exec_id: 1,
+        lock_event: None,
     };
 
     // Filter 跨线程传递（Send），线程内调用 matches（Sync 不需要但这证明 Send）
@@ -265,6 +266,7 @@ fn test_filter_matches_directly() {
         exectime: 500.0,
         rowcount: 10,
         exec_id: 42,
+        lock_event: None,
     };
 
     // 多条件 AND，全部满足

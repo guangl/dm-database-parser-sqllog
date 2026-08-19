@@ -290,6 +290,7 @@ mod tests {
             exectime: 150.0,
             rowcount: 10,
             exec_id: 999,
+            lock_event: None,
         }
     }
 
