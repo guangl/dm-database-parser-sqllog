@@ -87,7 +87,7 @@ pub(crate) mod record;
 pub use error::ParseError;
 pub use filter::{Filter, FilterBuilder};
 pub use parser::{FileEncodingHint, LogIterator, LogParser, LogParserBuilder};
-pub use record::Sqllog;
+pub use record::{LockEvent, Sqllog};
 
 #[cfg(feature = "async")]
 pub mod async_api;
